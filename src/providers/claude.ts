@@ -26,8 +26,14 @@ export const claudeAdapter: ProviderAdapter = {
 
   async send(opts: SendOpts, onEvent: (e: AgentEvent) => void): Promise<void> {
     const ac = new AbortController();
-    const onAbort = () => ac.abort();
-    if (opts.signal.aborted) ac.abort();
+    const onAbort = () => {
+      try {
+        ac.abort();
+      } catch {
+        /* the SDK may have already torn down the controller */
+      }
+    };
+    if (opts.signal.aborted) onAbort();
     opts.signal.addEventListener("abort", onAbort);
 
     let sessionId: string | undefined = opts.sessionId;

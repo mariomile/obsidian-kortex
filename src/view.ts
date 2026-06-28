@@ -4,7 +4,6 @@ import {
   MarkdownRenderer,
   FileSystemAdapter,
   FuzzySuggestModal,
-  Menu,
   TFile,
   setIcon,
   Notice,
@@ -44,6 +43,7 @@ interface ConvoData {
   provider: ProviderId;
   model: string;
   sessionId?: string;
+  updatedAt?: number;
   messages: Message[];
 }
 
@@ -55,6 +55,7 @@ interface Convo {
   provider: ProviderId;
   model: string;
   allow: Set<string>;
+  updatedAt?: number;
   messages: Message[];
 }
 
@@ -85,6 +86,8 @@ export class ChatView extends ItemView {
   private active!: Convo;
 
   private listWrap!: HTMLElement;
+  private composerEl!: HTMLElement;
+  private galleryEl: HTMLElement | null = null;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private providerPill!: HTMLElement;
@@ -150,7 +153,7 @@ export class ChatView extends ItemView {
 
     const histBtn = header.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "History" } });
     setIcon(histBtn, "history");
-    histBtn.onclick = (e) => this.openHistory(e);
+    histBtn.onclick = () => this.toggleGallery();
 
     const newChat = header.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "New chat" } });
     setIcon(newChat, "plus");
@@ -203,6 +206,7 @@ export class ChatView extends ItemView {
         provider: d.provider === "codex" ? "codex" : "claude",
         model: d.model || "",
         allow: new Set(),
+        updatedAt: d.updatedAt,
         messages: d.messages,
       };
       this.renderConvoDom(c);
@@ -234,6 +238,7 @@ export class ChatView extends ItemView {
       provider: c.provider,
       model: c.model,
       sessionId: c.sessionId,
+      updatedAt: c.updatedAt,
       messages: c.messages.map((m) =>
         m.role === "assistant"
           ? {
@@ -276,6 +281,7 @@ export class ChatView extends ItemView {
   }
 
   private newConversation(): void {
+    if (this.galleryEl) this.hideGallery();
     if (this.streaming) this.abort?.abort();
     this.saveActive();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
@@ -302,25 +308,91 @@ export class ChatView extends ItemView {
     this.scrollToBottom();
   }
 
-  private openHistory(e: MouseEvent): void {
-    const menu = new Menu();
-    const all = this.convos.includes(this.active) ? this.convos : [...this.convos, this.active];
-    if (all.length === 0) menu.addItem((i) => i.setTitle("No conversations yet").setDisabled(true));
-    for (const c of [...all].reverse()) {
-      menu.addItem((i) =>
-        i
-          .setTitle(c.title || "New chat")
-          .setChecked(c === this.active)
-          .onClick(() => this.switchTo(c))
-      );
+  private toggleGallery(): void {
+    if (this.galleryEl) this.hideGallery();
+    else this.showGallery();
+  }
+
+  private hideGallery(): void {
+    this.galleryEl?.remove();
+    this.galleryEl = null;
+    this.listEl.show();
+    this.composerEl.show();
+  }
+
+  private showGallery(): void {
+    this.saveActive();
+    if (!this.convos.includes(this.active)) this.convos.push(this.active);
+    this.listEl.hide();
+    this.composerEl.hide();
+    const wrap = this.listWrap.createDiv({ cls: "mva-gallery-wrap" });
+    this.galleryEl = wrap;
+    wrap.createDiv({ cls: "mva-gallery-title", text: "Conversations" });
+    const grid = wrap.createDiv({ cls: "mva-gallery" });
+
+    const sorted = [...this.convos]
+      .filter((c) => c.messages.length > 0 || c === this.active)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+
+    if (sorted.length === 0) {
+      grid.createDiv({ cls: "mva-empty-sub", text: "No conversations yet." });
+      return;
     }
-    menu.showAtMouseEvent(e);
+    for (const c of sorted) this.renderCard(grid, c);
+  }
+
+  private renderCard(grid: HTMLElement, c: Convo): void {
+    const card = grid.createDiv({ cls: "mva-card" });
+    if (c === this.active) card.addClass("is-active");
+    const head = card.createDiv({ cls: "mva-card-head" });
+    const dot = head.createSpan({ cls: "mva-dot" });
+    dot.style.background = ADAPTERS[c.provider].brandColor;
+    dot.style.color = ADAPTERS[c.provider].brandColor;
+    head.createSpan({ cls: "mva-card-title", text: c.title || "New chat" });
+
+    const preview = this.convoPreview(c);
+    card.createDiv({ cls: "mva-card-preview", text: preview || "Empty conversation" });
+
+    const meta = card.createDiv({ cls: "mva-card-meta" });
+    meta.createSpan({ text: ADAPTERS[c.provider].displayName });
+    const count = c.messages.filter((m) => m.role === "user").length;
+    meta.createSpan({ text: `${count} message${count === 1 ? "" : "s"}` });
+    if (c.updatedAt) meta.createSpan({ text: this.formatDate(c.updatedAt) });
+
+    card.onclick = () => {
+      this.hideGallery();
+      this.switchTo(c);
+    };
+  }
+
+  private convoPreview(c: Convo): string {
+    let s = "";
+    for (const m of c.messages) {
+      const part =
+        m.role === "user"
+          ? m.text
+          : m.segments
+              .map((seg) => (seg.t === "text" ? seg.md : `↳ ${toolMeta(seg.name, seg.input).label}`))
+              .join(" ");
+      s += part.replace(/[#*`>_~]/g, "").replace(/\s+/g, " ").trim() + "  ";
+      if (s.length > 320) break;
+    }
+    return s.trim();
+  }
+
+  private formatDate(ts: number): string {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
   }
 
   /* ---------------------------- context ----------------------------- */
 
   private buildComposer(root: HTMLElement): void {
     const bar = root.createDiv({ cls: "mva-composer" });
+    this.composerEl = bar;
     this.contextEl = bar.createDiv({ cls: "mva-context" });
     const row = bar.createDiv({ cls: "mva-input-row" });
     this.inputEl = row.createEl("textarea", {
@@ -724,6 +796,7 @@ export class ChatView extends ItemView {
       }
     } finally {
       if (ctx.segments.length) this.active.messages.push({ role: "assistant", segments: ctx.segments });
+      this.active.updatedAt = Date.now();
       this.setStreaming(false);
       this.abort = undefined;
       this.persist();
