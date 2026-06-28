@@ -1,0 +1,578 @@
+/* Marioverse Agent — theme-agnostic chat UI.
+   Built entirely on Obsidian's native CSS variables so it adapts to ANY theme.
+   The only fixed colors are per-provider brand accents (Claude / Codex). */
+
+.mva-root {
+  --mva-r1: 6px;
+  --mva-r2: 9px;
+  --mva-r3: 13px;
+  --mva-t: 0.14s ease;
+  --mva-brand: var(--interactive-accent);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+  background: transparent; /* inherit the native leaf background, like Claudian */
+}
+
+/* ------------------------------- header ------------------------------- */
+.mva-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+}
+
+.mva-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+  transition: background var(--mva-t), border-color var(--mva-t);
+  user-select: none;
+}
+.mva-pill:hover {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  border-color: var(--mva-brand);
+}
+.mva-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px 0 currentColor;
+}
+
+.mva-model {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r1);
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: border-color var(--mva-t), color var(--mva-t);
+}
+.mva-model:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.mva-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+  box-shadow: none;
+  transition: background var(--mva-t), color var(--mva-t);
+}
+.mva-icon-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* -------------------------------- list -------------------------------- */
+.mva-list-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.mva-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scrollbar-width: thin;
+}
+
+.mva-turn {
+  display: flex;
+  flex-direction: column;
+  animation: mva-pop 0.18s ease-out;
+}
+.mva-user {
+  align-items: flex-end;
+}
+.mva-assistant {
+  align-items: stretch;
+}
+
+.mva-bubble {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-normal);
+  word-break: break-word;
+}
+.mva-user .mva-bubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r3);
+  border-bottom-right-radius: var(--mva-r1);
+}
+.mva-assistant .mva-bubble {
+  padding: 2px 2px;
+}
+
+/* tighten markdown spacing inside bubbles */
+.mva-bubble > :first-child {
+  margin-top: 0;
+}
+.mva-bubble > :last-child {
+  margin-bottom: 0;
+}
+.mva-bubble p {
+  margin: 0.4em 0;
+}
+.mva-bubble pre {
+  border-radius: var(--mva-r2);
+}
+
+.mva-error .mva-bubble {
+  color: var(--text-error);
+}
+.mva-faint {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+/* ----------------------------- thinking ------------------------------- */
+.mva-thinking {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 0;
+}
+.mva-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: mva-pulse 1.1s ease-in-out infinite;
+}
+.mva-thinking-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.mva-thinking-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+/* ------------------------------ composer ------------------------------ */
+.mva-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: transparent;
+  flex-shrink: 0;
+}
+.mva-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* ------------------------------ context ------------------------------- */
+.mva-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mva-context.is-empty {
+  display: none;
+}
+.mva-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 7px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r1);
+}
+.mva-chip-icon {
+  display: inline-flex;
+  opacity: 0.7;
+}
+.mva-chip-icon .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+.mva-chip-label {
+  font-family: var(--font-monospace);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mva-chip-x {
+  display: inline-flex;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--mva-t);
+}
+.mva-chip-x:hover {
+  opacity: 1;
+}
+.mva-chip-x .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ------------------------------- copy --------------------------------- */
+.mva-copy {
+  align-self: flex-start;
+  margin-top: 2px;
+  display: inline-flex;
+  padding: 3px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+  box-shadow: none;
+  opacity: 0;
+  transition: opacity var(--mva-t), color var(--mva-t);
+}
+.mva-assistant:hover .mva-copy {
+  opacity: 1;
+}
+.mva-copy:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.mva-copy .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.mva-input {
+  flex: 1;
+  resize: none;
+  min-height: 38px;
+  max-height: 200px;
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  transition: border-color var(--mva-t), box-shadow var(--mva-t);
+}
+.mva-input:focus {
+  outline: none;
+  border-color: var(--mva-brand);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mva-brand) 35%, transparent);
+}
+.mva-input::placeholder {
+  color: var(--text-faint);
+}
+
+.mva-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-on-accent);
+  background: var(--mva-brand);
+  border: none;
+  border-radius: var(--mva-r2);
+  cursor: pointer;
+  box-shadow: none;
+  transition: opacity var(--mva-t), transform var(--mva-t);
+}
+.mva-send:hover {
+  opacity: 0.9;
+}
+.mva-send.is-streaming {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* ----------------------------- empty state ---------------------------- */
+.mva-empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px;
+}
+.mva-empty-icon {
+  color: var(--mva-brand);
+  opacity: 0.8;
+}
+.mva-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.mva-empty-sub {
+  font-size: 12.5px;
+  color: var(--text-faint);
+  max-width: 240px;
+}
+
+/* --------------------------- assistant body --------------------------- */
+.mva-assistant-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mva-inline-error {
+  color: var(--text-error);
+  font-size: 13px;
+}
+
+/* ------------------------------ tool card ----------------------------- */
+.mva-tool {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  background: var(--background-primary);
+  overflow: hidden;
+  font-size: 12.5px;
+}
+.mva-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.mva-tool-head:hover {
+  background: var(--background-modifier-hover);
+}
+.mva-tool-status,
+.mva-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.mva-tool-status .svg-icon,
+.mva-tool-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+.mva-tool.is-running .mva-tool-status {
+  color: var(--mva-brand, var(--interactive-accent));
+  animation: mva-spin 0.9s linear infinite;
+}
+.mva-tool.is-ok .mva-tool-status {
+  color: var(--color-green, #19c37d);
+}
+.mva-tool.is-error .mva-tool-status {
+  color: var(--text-error);
+}
+.mva-tool-name {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.mva-tool-target {
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mva-tool-body {
+  padding: 2px 10px 10px;
+}
+.mva-tool.is-collapsed .mva-tool-body {
+  display: none;
+}
+.mva-tool-output {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--background-secondary);
+  border-radius: var(--mva-r1);
+  padding: 8px 10px;
+}
+.mva-tool-note {
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* ------------------------------- diff --------------------------------- */
+.mva-diff,
+.mva-code {
+  margin: 6px 0 0;
+  font-family: var(--font-monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: var(--background-secondary);
+  border-radius: var(--mva-r1);
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.mva-diff-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mva-diff-line.mva-del {
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 9%, transparent);
+}
+.mva-diff-line.mva-add {
+  color: var(--color-green, #19c37d);
+  background: color-mix(in srgb, var(--color-green, #19c37d) 10%, transparent);
+}
+
+/* ------------------------------ params -------------------------------- */
+.mva-params {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+.mva-param {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.mva-param-k {
+  color: var(--text-faint);
+  min-width: 70px;
+  font-family: var(--font-monospace);
+}
+.mva-param-v {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  word-break: break-all;
+}
+
+/* --------------------------- permission card -------------------------- */
+.mva-perm {
+  border: 1px solid color-mix(in srgb, var(--color-orange, #e0a341) 30%, var(--background-modifier-border));
+  border-radius: var(--mva-r2);
+  background: color-mix(in srgb, var(--color-orange, #e0a341) 5%, var(--background-primary));
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.mva-perm-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.mva-perm-icon {
+  display: inline-flex;
+  color: var(--color-orange, #e0a341);
+}
+.mva-perm-icon .svg-icon {
+  width: 15px;
+  height: 15px;
+}
+.mva-perm-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.mva-perm-detail {
+  margin: 4px 0 2px;
+}
+.mva-perm-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.mva-perm.is-resolved {
+  opacity: 0.7;
+}
+.mva-perm-verdict {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ------------------------------ buttons ------------------------------- */
+.mva-btn {
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+  box-shadow: none;
+  transition: background var(--mva-t), border-color var(--mva-t);
+}
+.mva-btn:hover {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+}
+.mva-btn-primary {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: transparent;
+}
+.mva-btn-primary:hover {
+  background: var(--interactive-accent-hover, var(--interactive-accent));
+  opacity: 0.92;
+}
+.mva-btn-danger {
+  color: var(--text-error);
+  border-color: color-mix(in srgb, var(--text-error) 35%, transparent);
+}
+.mva-btn-danger:hover {
+  background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+/* ------------------------------ keyframes ----------------------------- */
+@keyframes mva-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mva-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes mva-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
