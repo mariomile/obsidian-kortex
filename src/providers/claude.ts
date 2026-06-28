@@ -44,6 +44,9 @@ export const claudeAdapter: ProviderAdapter = {
         options: {
           cwd: opts.cwd,
           ...(opts.model && opts.model !== "default" ? { model: opts.model } : {}),
+          ...(opts.effort && opts.effort !== "default"
+            ? { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" }
+            : {}),
           ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
           ...(opts.sessionId ? { resume: opts.sessionId } : {}),
           pathToClaudeCodeExecutable: opts.cli.bin,

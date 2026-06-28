@@ -28,6 +28,9 @@ export const codexAdapter: ProviderAdapter = {
     // Sandbox: Phase 1 (no tools) → read-only. Phase 2 agentic → workspace-write.
     args.push("-s", opts.toolsEnabled ? "workspace-write" : "read-only");
     if (opts.model && opts.model !== "default") args.push("-m", opts.model);
+    if (opts.effort && opts.effort !== "default") {
+      args.push("-c", `model_reasoning_effort="${opts.effort}"`);
+    }
 
     // Resume a prior session for a continuous conversation.
     if (opts.sessionId) {

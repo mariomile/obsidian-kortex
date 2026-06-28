@@ -8,7 +8,10 @@ export interface MVASettings {
   codexBin: string;
   claudeModel: string;
   codexModel: string;
+  effort: string;
   systemPrompt: string;
+  /** User-defined prompt templates surfaced in the "/" menu. */
+  customPrompts: { name: string; prompt: string }[];
   /** Phase 1 default: false (pure chat). Phase 2 turns this on with gating. */
   toolsEnabled: boolean;
   permissionMode: PermissionMode;
@@ -21,7 +24,9 @@ export const DEFAULT_SETTINGS: MVASettings = {
   codexBin: "",
   claudeModel: "",
   codexModel: "",
+  effort: "default",
   systemPrompt: "",
+  customPrompts: [],
   toolsEnabled: false,
   permissionMode: "default",
   autoAllowRead: true,
@@ -90,6 +95,28 @@ export class MVASettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("Custom prompts")
+      .setDesc('One per line as "Name | prompt text". Surfaced in the "/" menu in the composer.')
+      .addTextArea((t) => {
+        t.setPlaceholder("Summarize | Summarize the current note in 5 bullets")
+          .setValue(this.plugin.settings.customPrompts.map((p) => `${p.name} | ${p.prompt}`).join("\n"))
+          .onChange(async (v) => {
+            this.plugin.settings.customPrompts = v
+              .split("\n")
+              .map((line) => {
+                const i = line.indexOf("|");
+                if (i < 0) return null;
+                const name = line.slice(0, i).trim();
+                const prompt = line.slice(i + 1).trim();
+                return name && prompt ? { name, prompt } : null;
+              })
+              .filter((x): x is { name: string; prompt: string } => x !== null);
+            await this.plugin.saveSettings();
+          });
+        t.inputEl.rows = 5;
+      });
 
     new Setting(containerEl).setName("Agentic capabilities").setHeading();
 

@@ -409,6 +409,45 @@ export class ChatView extends ItemView {
     this.sendBtn = row.createEl("button", { cls: "mva-send", attr: { "aria-label": "Send" } });
     setIcon(this.sendBtn, "arrow-up");
     this.sendBtn.onclick = () => (this.streaming ? this.stop() : void this.send());
+
+    this.buildToolbar(bar);
+  }
+
+  private buildToolbar(bar: HTMLElement): void {
+    const tb = bar.createDiv({ cls: "mva-toolbar" });
+    const s = this.plugin.settings;
+
+    const effort = this.toolbarSelect(tb, "Effort", [
+      ["default", "Effort: default"],
+      ["low", "Effort: low"],
+      ["medium", "Effort: medium"],
+      ["high", "Effort: high"],
+      ["xhigh", "Effort: xhigh"],
+      ["max", "Effort: max"],
+    ]);
+    effort.value = s.effort || "default";
+    effort.onchange = () => {
+      s.effort = effort.value;
+      void this.plugin.saveSettings();
+    };
+
+    const perm = this.toolbarSelect(tb, "Permissions", [
+      ["default", "Permissions: ask"],
+      ["acceptEdits", "Permissions: accept edits"],
+      ["plan", "Permissions: plan"],
+      ["bypassPermissions", "Permissions: bypass"],
+    ]);
+    perm.value = s.permissionMode;
+    perm.onchange = () => {
+      s.permissionMode = perm.value as typeof s.permissionMode;
+      void this.plugin.saveSettings();
+    };
+  }
+
+  private toolbarSelect(parent: HTMLElement, label: string, opts: [string, string][]): HTMLSelectElement {
+    const sel = parent.createEl("select", { cls: "mva-tb-select", attr: { "aria-label": label } });
+    for (const [v, t] of opts) sel.createEl("option", { text: t }).value = v;
+    return sel;
   }
 
   private activeNotePath(): string | null {
@@ -766,6 +805,7 @@ export class ChatView extends ItemView {
         {
           cli,
           model: this.model,
+          effort: s.effort,
           systemPrompt: s.systemPrompt || undefined,
           message,
           sessionId: this.sessionId,

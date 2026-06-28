@@ -190,6 +190,26 @@
   align-items: flex-end;
   gap: 8px;
 }
+.mva-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.mva-tb-select {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--mva-r1);
+  transition: color var(--mva-t), background var(--mva-t);
+}
+.mva-tb-select:hover {
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+}
 
 /* ------------------------------ context ------------------------------- */
 .mva-context {

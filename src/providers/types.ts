@@ -38,6 +38,8 @@ export interface SendOpts {
   cli: ResolvedCli;
   /** Model id, or "" / "default" for the CLI's configured default. */
   model: string;
+  /** Reasoning effort: "default" | low | medium | high | xhigh | max. */
+  effort: string;
   /** Optional system prompt override. */
   systemPrompt?: string;
   /** The user's message text. */
