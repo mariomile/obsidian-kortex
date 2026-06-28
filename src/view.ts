@@ -5,9 +5,11 @@ import {
   FileSystemAdapter,
   FuzzySuggestModal,
   TFile,
+  TFolder,
   setIcon,
   Notice,
 } from "obsidian";
+import { Autocomplete, type AcItem } from "./ui/autocomplete";
 import type MarioverseAgentPlugin from "./main";
 import { resolveCli, describeError, isAbort } from "./cli";
 import { claudeAdapter } from "./providers/claude";
@@ -410,7 +412,80 @@ export class ChatView extends ItemView {
     setIcon(this.sendBtn, "arrow-up");
     this.sendBtn.onclick = () => (this.streaming ? this.stop() : void this.send());
 
+    new Autocomplete(this.inputEl, row, [
+      { trigger: "/", getItems: (q) => this.slashItems(q) },
+      { trigger: "@", getItems: (q) => this.atItems(q) },
+    ]);
+
     this.buildToolbar(bar);
+  }
+
+  /* --------------------------- autocomplete ------------------------- */
+
+  private slashCache: { commands: string[]; skills: string[] } | null = null;
+
+  private async loadSlash(): Promise<{ commands: string[]; skills: string[] }> {
+    if (this.slashCache) return this.slashCache;
+    const commands: string[] = [];
+    const skills: string[] = [];
+    const base = (p: string) => p.split("/").pop()?.replace(/\.md$/, "") ?? p;
+    try {
+      const c = await this.app.vault.adapter.list(".claude/commands");
+      for (const f of c.files) if (f.endsWith(".md")) commands.push(base(f));
+    } catch {
+      /* no commands dir */
+    }
+    try {
+      const s = await this.app.vault.adapter.list(".claude/skills");
+      for (const folder of s.folders) skills.push(folder.split("/").pop() ?? folder);
+      for (const f of s.files) if (f.endsWith(".md")) skills.push(base(f));
+    } catch {
+      /* no skills dir */
+    }
+    this.slashCache = { commands, skills };
+    return this.slashCache;
+  }
+
+  private async slashItems(query: string): Promise<AcItem[]> {
+    const q = query.toLowerCase();
+    const out: AcItem[] = [];
+    for (const p of this.plugin.settings.customPrompts) {
+      if (p.name.toLowerCase().includes(q)) {
+        out.push({ label: p.name, detail: "prompt", icon: "message-square", insert: p.prompt + " " });
+      }
+    }
+    const { commands, skills } = await this.loadSlash();
+    for (const c of commands) {
+      if (c.toLowerCase().includes(q)) out.push({ label: c, detail: "command", icon: "terminal", insert: `/${c} ` });
+    }
+    for (const sk of skills) {
+      if (sk.toLowerCase().includes(q)) out.push({ label: sk, detail: "skill", icon: "sparkles", insert: `/${sk} ` });
+    }
+    return out;
+  }
+
+  private atItems(query: string): AcItem[] {
+    const q = query.toLowerCase();
+    const out: AcItem[] = [];
+    for (const f of this.app.vault.getAllLoadedFiles()) {
+      if (!f.path || f.path === "/") continue;
+      if (q && !f.path.toLowerCase().includes(q)) continue;
+      const isFolder = f instanceof TFolder;
+      if (!isFolder && !(f instanceof TFile)) continue;
+      const parent = f.parent && f.parent.path !== "/" ? f.parent.path : "";
+      out.push({
+        label: isFolder ? `${f.name}/` : f.name,
+        detail: parent,
+        icon: isFolder ? "folder" : "file-text",
+        insert: `@${f.path}${isFolder ? "/" : ""} `,
+        onSelect: () => {
+          if (!this.manualAttached.includes(f.path)) this.manualAttached.push(f.path);
+          this.refreshContext();
+        },
+      });
+      if (out.length >= 40) break;
+    }
+    return out;
   }
 
   private buildToolbar(bar: HTMLElement): void {

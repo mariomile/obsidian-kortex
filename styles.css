@@ -189,6 +189,61 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  position: relative;
+}
+
+/* --------------------------- autocomplete ----------------------------- */
+.mva-ac {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  z-index: 30;
+  scrollbar-width: thin;
+}
+.mva-ac-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.mva-ac-item.is-sel {
+  background: var(--background-modifier-hover);
+}
+.mva-ac-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.mva-ac-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+.mva-ac-label {
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mva-ac-detail {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-family: var(--font-monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
 }
 .mva-toolbar {
   display: flex;
