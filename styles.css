@@ -24,45 +24,32 @@
   flex-shrink: 0;
 }
 
-.mva-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--mva-r1);
-  cursor: pointer;
-  transition: background var(--mva-t), border-color var(--mva-t);
-  user-select: none;
-}
-.mva-pill:hover {
-  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
-  border-color: var(--mva-brand);
-}
 .mva-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   box-shadow: 0 0 6px 0 currentColor;
+  flex-shrink: 0;
 }
 
-.mva-model {
-  font-size: 12px;
-  color: var(--text-muted);
-  background: transparent;
+.mva-select {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--mva-r1);
-  padding: 3px 6px;
+  padding: 3px 8px;
   cursor: pointer;
-  transition: border-color var(--mva-t), color var(--mva-t);
+  max-width: 40%;
+  transition: border-color var(--mva-t), background var(--mva-t);
 }
-.mva-model:hover {
-  color: var(--text-normal);
+.mva-select:hover {
   border-color: var(--background-modifier-border-hover);
+}
+.mva-select:focus {
+  outline: none;
+  border-color: var(--mva-brand);
 }
 
 .mva-icon-btn {
@@ -266,6 +253,37 @@
   background: var(--background-modifier-hover);
 }
 
+/* effort slider */
+.mva-slider-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.mva-slider-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mva-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--background-modifier-border-hover);
+  cursor: pointer;
+}
+.mva-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--mva-brand, var(--interactive-accent));
+  cursor: pointer;
+}
+
 /* ------------------------------ context ------------------------------- */
 .mva-context {
   display: flex;
@@ -384,8 +402,8 @@
 .mva-input {
   flex: 1;
   resize: none;
-  min-height: 38px;
-  max-height: 200px;
+  min-height: 58px;
+  max-height: 220px;
   padding: 9px 12px;
   font-size: 14px;
   line-height: 1.45;

@@ -114,7 +114,8 @@ export class ChatView extends ItemView {
   private galleryEl: HTMLElement | null = null;
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
-  private providerPill!: HTMLElement;
+  private brandDot!: HTMLElement;
+  private providerSelect!: HTMLSelectElement;
   private modelSelect!: HTMLSelectElement;
   private contextEl!: HTMLElement;
   private excludeActiveNote = false;
@@ -229,9 +230,14 @@ export class ChatView extends ItemView {
 
   private buildHeader(root: HTMLElement): void {
     const header = root.createDiv({ cls: "mva-header" });
-    this.providerPill = header.createDiv({ cls: "mva-pill", attr: { "aria-label": "Switch provider" } });
-    this.providerPill.onclick = () => this.cycleProvider();
-    this.modelSelect = header.createEl("select", { cls: "mva-model" });
+    this.brandDot = header.createSpan({ cls: "mva-dot" });
+    this.providerSelect = header.createEl("select", { cls: "mva-select", attr: { "aria-label": "Provider" } });
+    for (const id of ["claude", "codex"] as ProviderId[]) {
+      this.providerSelect.createEl("option", { text: ADAPTERS[id].displayName }).value = id;
+    }
+    this.providerSelect.onchange = () => this.onProviderChange(this.providerSelect.value as ProviderId);
+
+    this.modelSelect = header.createEl("select", { cls: "mva-select", attr: { "aria-label": "Model" } });
     this.modelSelect.onchange = () => {
       this.model = this.modelSelect.value;
       this.persistModel();
@@ -249,10 +255,13 @@ export class ChatView extends ItemView {
     this.refreshProviderUI();
   }
 
-  private cycleProvider(): void {
-    if (this.streaming) return;
-    this.provider = this.provider === "claude" ? "codex" : "claude";
-    this.model = this.provider === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel;
+  private onProviderChange(next: ProviderId): void {
+    if (this.streaming || next === this.provider) {
+      this.providerSelect.value = this.provider; // revert if blocked
+      return;
+    }
+    this.provider = next;
+    this.model = next === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel;
     this.sessionId = undefined;
     this.active.sessionId = undefined;
     this.sessionAllow.clear();
@@ -263,12 +272,10 @@ export class ChatView extends ItemView {
 
   private refreshProviderUI(): void {
     const a = ADAPTERS[this.provider];
-    this.providerPill.empty();
-    const dot = this.providerPill.createSpan({ cls: "mva-dot" });
-    dot.style.background = a.brandColor;
-    dot.style.color = a.brandColor;
-    this.providerPill.createSpan({ text: a.displayName });
-    this.providerPill.style.setProperty("--mva-brand", a.brandColor);
+    this.providerSelect.value = this.provider;
+    this.brandDot.style.background = a.brandColor;
+    this.brandDot.style.color = a.brandColor;
+    this.contentEl.style.setProperty("--mva-brand", a.brandColor);
     this.modelSelect.empty();
     for (const m of a.models()) {
       this.modelSelect.createEl("option", { text: m.label }).value = m.id;
@@ -488,7 +495,7 @@ export class ChatView extends ItemView {
     const row = bar.createDiv({ cls: "mva-input-row" });
     this.inputEl = row.createEl("textarea", {
       cls: "mva-input",
-      attr: { rows: "1", placeholder: "Message the agent…  (⏎ to send, ⇧⏎ for newline)" },
+      attr: { rows: "2", placeholder: "Message the agent…   ⏎ send · ⇧⏎ newline" },
     });
     this.inputEl.addEventListener("input", () => this.autoGrow());
     this.inputEl.addEventListener("keydown", (e) => {
@@ -577,21 +584,25 @@ export class ChatView extends ItemView {
     return out;
   }
 
+  private static readonly EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"];
+
   private buildToolbar(bar: HTMLElement): void {
     const tb = bar.createDiv({ cls: "mva-toolbar" });
     const s = this.plugin.settings;
 
-    const effort = this.toolbarSelect(tb, "Effort", [
-      ["default", "Effort: default"],
-      ["low", "Effort: low"],
-      ["medium", "Effort: medium"],
-      ["high", "Effort: high"],
-      ["xhigh", "Effort: xhigh"],
-      ["max", "Effort: max"],
-    ]);
-    effort.value = s.effort || "default";
-    effort.onchange = () => {
-      s.effort = effort.value;
+    // Effort as a slider (default · low → max)
+    const eff = tb.createDiv({ cls: "mva-slider-wrap" });
+    const effLabel = eff.createSpan({ cls: "mva-slider-label" });
+    const slider = eff.createEl("input", {
+      cls: "mva-slider",
+      attr: { type: "range", min: "0", max: "5", step: "1", "aria-label": "Effort" },
+    });
+    const setEffLabel = () => effLabel.setText(`Effort: ${ChatView.EFFORTS[Number(slider.value)]}`);
+    slider.value = String(Math.max(0, ChatView.EFFORTS.indexOf(s.effort || "default")));
+    setEffLabel();
+    slider.oninput = () => {
+      setEffLabel();
+      s.effort = ChatView.EFFORTS[Number(slider.value)];
       void this.plugin.saveSettings();
     };
 
