@@ -52,6 +52,8 @@ export interface SendOpts {
   permissionMode: PermissionMode;
   /** Whether tools (Read/Write/Edit/Bash/…) are enabled at all. */
   toolsEnabled: boolean;
+  /** Skip global hooks + MCP servers for faster cold start. */
+  fastStartup: boolean;
   signal: AbortSignal;
 }
 

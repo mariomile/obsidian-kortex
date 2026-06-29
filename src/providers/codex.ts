@@ -31,6 +31,8 @@ export const codexAdapter: ProviderAdapter = {
     if (opts.effort && opts.effort !== "default") {
       args.push("-c", `model_reasoning_effort="${opts.effort}"`);
     }
+    // Fast cold start: don't spin up MCP servers.
+    if (opts.fastStartup) args.push("-c", "mcp_servers={}");
 
     // Resume a prior session for a continuous conversation.
     if (opts.sessionId) {

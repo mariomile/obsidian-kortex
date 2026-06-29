@@ -329,31 +329,57 @@
   font-family: inherit;
 }
 
-/* ------------------------------- copy --------------------------------- */
-.mva-copy {
-  align-self: flex-start;
-  margin-top: 2px;
+/* --------------------------- message actions -------------------------- */
+.mva-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity var(--mva-t);
+}
+.mva-assistant:hover .mva-actions {
+  opacity: 1;
+}
+.mva-act {
   display: inline-flex;
-  padding: 3px;
+  padding: 4px;
   color: var(--text-faint);
   background: transparent;
   border: none;
   border-radius: var(--mva-r1);
   cursor: pointer;
   box-shadow: none;
-  opacity: 0;
-  transition: opacity var(--mva-t), color var(--mva-t);
+  transition: color var(--mva-t), background var(--mva-t);
 }
-.mva-assistant:hover .mva-copy {
-  opacity: 1;
-}
-.mva-copy:hover {
+.mva-act:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
-.mva-copy .svg-icon {
+.mva-act .svg-icon {
   width: 13px;
   height: 13px;
+}
+
+/* streaming caret — signals the agent is still writing */
+.mva-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--mva-brand, var(--interactive-accent));
+  animation: mva-blink 1s steps(2, start) infinite;
+}
+
+/* clickable note target inside a tool card */
+.mva-link {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.mva-link:hover {
+  color: var(--text-accent, var(--interactive-accent));
 }
 .mva-input {
   flex: 1;
@@ -404,28 +430,57 @@
 
 /* ----------------------------- empty state ---------------------------- */
 .mva-empty {
-  margin: auto;
+  margin-block: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
-  text-align: center;
-  color: var(--text-muted);
-  padding: 24px;
-}
-.mva-empty-icon {
-  color: var(--mva-brand);
-  opacity: 0.8;
+  padding: 12px 4px;
 }
 .mva-empty-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
   color: var(--text-normal);
 }
 .mva-empty-sub {
-  font-size: 12.5px;
-  color: var(--text-faint);
-  max-width: 240px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 36ch;
+}
+.mva-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  width: 100%;
+}
+.mva-starter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--text-normal) 3%, transparent);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  cursor: pointer;
+  transition: background var(--mva-t), border-color var(--mva-t), transform var(--mva-t);
+}
+.mva-starter:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+  transform: translateX(2px);
+}
+.mva-starter-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.mva-starter-icon .svg-icon {
+  width: 15px;
+  height: 15px;
 }
 
 /* --------------------------- assistant body --------------------------- */
@@ -720,6 +775,16 @@
 @keyframes mva-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@keyframes mva-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
   }
 }
 @keyframes mva-pop {

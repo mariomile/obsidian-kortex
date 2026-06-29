@@ -5,6 +5,18 @@ export interface ToolMeta {
   icon: string; // lucide icon id
   label: string;
   target: string; // short context (file path, command, pattern…)
+  /** Vault path to open when the target is clicked (file tools only). */
+  openPath?: string;
+}
+
+const FILE_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+/** The raw file path a tool operates on, if any (for click-to-open). */
+export function toolFilePath(name: string, input: unknown): string | undefined {
+  if (!FILE_TOOLS.has(name)) return undefined;
+  const i = rec(input);
+  const p = asString(i.file_path || i.notebook_path);
+  return p || undefined;
 }
 
 function asString(v: unknown): string {
@@ -17,6 +29,10 @@ function rec(input: unknown): Record<string, unknown> {
 
 /** Short, human label + target for a tool call. */
 export function toolMeta(name: string, input: unknown): ToolMeta {
+  return { ...baseMeta(name, input), openPath: toolFilePath(name, input) };
+}
+
+function baseMeta(name: string, input: unknown): Omit<ToolMeta, "openPath"> {
   const i = rec(input);
   // MCP tools arrive as mcp__server__tool
   if (name.startsWith("mcp__")) {

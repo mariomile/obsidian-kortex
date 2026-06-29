@@ -50,6 +50,12 @@ export const claudeAdapter: ProviderAdapter = {
           ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
           ...(opts.sessionId ? { resume: opts.sessionId } : {}),
           pathToClaudeCodeExecutable: opts.cli.bin,
+          // Fast cold start: skip the user's global SessionStart hooks (which
+          // can load large context blobs) and don't connect MCP servers. This
+          // is the main latency lever — each turn spawns a fresh CLI process.
+          ...(opts.fastStartup
+            ? { disableAllHooks: true, strictMcpConfig: true, mcpServers: {} }
+            : {}),
           // NOTE: we intentionally do NOT pass `settingSources: []`. Isolation
           // mode mangles a cwd containing a dot (e.g. "marioverse.ai" →
           // "marioverse-ai"), making the agent write to a phantom directory.

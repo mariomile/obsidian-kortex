@@ -579,17 +579,32 @@ export class ChatView extends ItemView {
 
   /* --------------------------- rendering ---------------------------- */
 
+  private static readonly STARTERS: [string, string, string][] = [
+    ["file-text", "Summarize this note", "Summarize the current note in 5 concise bullets."],
+    ["network", "Find related notes", "Find notes in my vault related to the current note and explain how they connect."],
+    ["list-checks", "Extract action items", "Extract every action item and open question from the current note as a checklist."],
+    ["pen-line", "Draft from outline", "Expand the outline in the current note into full prose in my voice."],
+  ];
+
   private renderEmptyState(): void {
     const empty = this.listEl.createDiv({ cls: "mva-empty" });
     const a = ADAPTERS[this.provider];
-    setIcon(empty.createDiv({ cls: "mva-empty-icon" }), "sparkles");
-    empty.createDiv({ cls: "mva-empty-title", text: `Ask ${a.displayName} anything` });
+    empty.createDiv({ cls: "mva-empty-title", text: `What are we working on?` });
     empty.createDiv({
       cls: "mva-empty-sub",
-      text: this.plugin.settings.toolsEnabled
-        ? "Agentic mode is on — your vault is the working directory."
-        : "Your vault is the working directory. Start a conversation below.",
+      text: `${a.displayName} works inside your vault — read, write, and reason over your notes.`,
     });
+    const starters = empty.createDiv({ cls: "mva-starters" });
+    for (const [icon, label, prompt] of ChatView.STARTERS) {
+      const chip = starters.createDiv({ cls: "mva-starter" });
+      setIcon(chip.createSpan({ cls: "mva-starter-icon" }), icon);
+      chip.createSpan({ text: label });
+      chip.onclick = () => {
+        this.inputEl.value = prompt;
+        this.inputEl.focus();
+        this.autoGrow();
+      };
+    }
   }
 
   private clearEmptyState(): void {
@@ -616,7 +631,7 @@ export class ChatView extends ItemView {
             this.finishToolCard(refs, s.ok !== false, s.output);
           }
         }
-        if (full.trim()) this.attachCopy(el, full);
+        if (full.trim()) this.attachActions(el, full);
       }
     }
   }
@@ -673,10 +688,13 @@ export class ChatView extends ItemView {
     this.scheduleRender(ctx);
   }
 
-  private renderText(ctx: AssistantCtx): void {
+  private renderText(ctx: AssistantCtx, streaming = false): void {
     if (!ctx.curTextEl) return;
-    ctx.curTextEl.empty();
-    void MarkdownRenderer.render(this.app, ctx.curRaw || "", ctx.curTextEl, "", this);
+    const el = ctx.curTextEl;
+    el.empty();
+    void MarkdownRenderer.render(this.app, ctx.curRaw || "", el, "", this).then(() => {
+      if (streaming && el.isConnected) el.createSpan({ cls: "mva-caret" });
+    });
   }
 
   private scheduleRender(ctx: AssistantCtx): void {
@@ -684,7 +702,7 @@ export class ChatView extends ItemView {
     if (this.renderTimer !== null) return;
     this.renderTimer = window.setTimeout(() => {
       this.renderTimer = null;
-      if (this.renderTarget) this.renderText(this.renderTarget);
+      if (this.renderTarget) this.renderText(this.renderTarget, true);
       this.scrollToBottom();
     }, 60);
   }
@@ -694,21 +712,49 @@ export class ChatView extends ItemView {
       window.clearTimeout(this.renderTimer);
       this.renderTimer = null;
     }
-    this.renderText(ctx);
+    this.renderText(ctx, false);
   }
 
-  private attachCopy(turnEl: HTMLElement, text: string): void {
-    const btn = turnEl.createEl("button", { cls: "mva-copy", attr: { "aria-label": "Copy" } });
-    setIcon(btn, "copy");
-    btn.onclick = () => {
+  private attachActions(turnEl: HTMLElement, text: string): void {
+    const bar = turnEl.createDiv({ cls: "mva-actions" });
+
+    const copy = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Copy" } });
+    setIcon(copy, "copy");
+    copy.onclick = () => {
       void navigator.clipboard.writeText(text);
-      btn.empty();
-      setIcon(btn, "check");
-      window.setTimeout(() => {
-        btn.empty();
-        setIcon(btn, "copy");
-      }, 1200);
+      this.flashIcon(copy, "check", "copy");
     };
+
+    const insert = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Insert into note" } });
+    setIcon(insert, "file-down");
+    insert.onclick = () => void this.insertIntoNote(text, insert);
+  }
+
+  private flashIcon(btn: HTMLElement, on: string, off: string): void {
+    btn.empty();
+    setIcon(btn, on);
+    window.setTimeout(() => {
+      btn.empty();
+      setIcon(btn, off);
+    }, 1200);
+  }
+
+  private async insertIntoNote(text: string, btn: HTMLElement): Promise<void> {
+    const f = this.app.workspace.getActiveFile();
+    if (!f) {
+      new Notice("Open a note first to insert into it.");
+      return;
+    }
+    await this.app.vault.append(f, `\n\n${text}\n`);
+    new Notice(`Inserted into ${f.basename}`);
+    this.flashIcon(btn, "check", "file-down");
+  }
+
+  private openNote(path: string): void {
+    let p = path;
+    const base = this.vaultPath();
+    if (base && p.startsWith(base)) p = p.slice(base.length).replace(/^\/+/, "");
+    void this.app.workspace.openLinkText(p, "", false);
   }
 
   /* ------------------------------ tools ----------------------------- */
@@ -721,7 +767,16 @@ export class ChatView extends ItemView {
     setIcon(statusEl, "loader");
     setIcon(head.createDiv({ cls: "mva-tool-icon" }), meta.icon);
     head.createSpan({ cls: "mva-tool-name", text: meta.label });
-    if (meta.target) head.createSpan({ cls: "mva-tool-target", text: meta.target });
+    if (meta.target) {
+      const t = head.createSpan({ cls: "mva-tool-target", text: meta.target });
+      if (meta.openPath) {
+        t.addClass("mva-link");
+        t.onclick = (e) => {
+          e.stopPropagation();
+          this.openNote(meta.openPath as string);
+        };
+      }
+    }
     const bodyEl = card.createDiv({ cls: "mva-tool-body" });
     renderToolDetail(bodyEl, name, input, null);
     head.onclick = () => card.toggleClass("is-collapsed", !card.hasClass("is-collapsed"));
@@ -887,12 +942,13 @@ export class ChatView extends ItemView {
           cwd: this.vaultPath(),
           permissionMode: s.permissionMode,
           toolsEnabled: s.toolsEnabled,
+          fastStartup: s.fastStartup,
           signal: this.abort.signal,
         },
         onEvent
       );
       this.flushRender(ctx);
-      if (ctx.fullText.trim()) this.attachCopy(ctx.el, ctx.fullText);
+      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText);
     } catch (err) {
       this.flushRender(ctx);
       if (isAbort(err)) {

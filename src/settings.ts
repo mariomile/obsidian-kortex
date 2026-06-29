@@ -16,6 +16,7 @@ export interface MVASettings {
   toolsEnabled: boolean;
   permissionMode: PermissionMode;
   autoAllowRead: boolean;
+  fastStartup: boolean;
 }
 
 export const DEFAULT_SETTINGS: MVASettings = {
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   toolsEnabled: false,
   permissionMode: "default",
   autoAllowRead: true,
+  fastStartup: true,
 };
 
 export class MVASettingTab extends PluginSettingTab {
@@ -117,6 +119,19 @@ export class MVASettingTab extends PluginSettingTab {
           });
         t.inputEl.rows = 5;
       });
+
+    new Setting(containerEl)
+      .setName("Fast startup")
+      .setDesc(
+        "Skip global SessionStart hooks and MCP servers on each turn for much faster responses. " +
+          "Turn off only if you need your MCP tools or hooks inside the chat."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.fastStartup).onChange(async (v) => {
+          this.plugin.settings.fastStartup = v;
+          await this.plugin.saveSettings();
+        })
+      );
 
     new Setting(containerEl).setName("Agentic capabilities").setHeading();
 
