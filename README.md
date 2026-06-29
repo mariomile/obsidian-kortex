@@ -10,7 +10,10 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 - **Permission gating** (Claude) — tool calls surface as cards; sensitive actions (Edit/Write/unlisted Bash) prompt with **Allow once / Always allow / Deny**, with a per-session allowlist and auto-allow for read-only tools. Codex is gated by its own sandbox (`workspace-write`).
 - **Tool-call cards** — running / success / error, with diff preview for edits and command + output for shell.
 - **Knowledge-work native** — answers stream with a live caret; assistant replies can be **inserted into the active note** or copied; tool cards link the **note they touched** (click to open it in the graph); a teaching empty state offers vault-aware starters.
+- **Persistent sessions** — Claude conversations keep one warm SDK process across turns (streaming-input), so follow-ups skip cold start and context is retained. A footer shows live **context-window usage**.
+- **Reasoning** — the model's thinking streams into a collapsible block.
 - **Fast startup** — skips global hooks + MCP per turn for snappier responses (toggle in settings).
+- **Resilient** — a clear setup card when the CLI isn't signed in; retry any turn.
 - **Composer power-ups** — `/` opens a palette of custom prompts + your vault's `.claude/` commands and skills; `@` mentions a file or folder to add it as context. Footer selectors for **effort** (low→max) and **permission mode**.
 - **Context** — the active note is auto-attached as a removable chip; attach more notes via the "+ Note" picker or `@`.
 - **History** — conversations **persist to disk** (survive reload, with session resume). The history button opens a **card gallery** with per-conversation previews (title, snippet, provider, message count, date); click a card to reopen it. Copy any reply.

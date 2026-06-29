@@ -1,78 +1,50 @@
-import { spawn } from "child_process";
-import { makeAbortError } from "../cli";
-import type { AgentEvent, ModelOption, ProviderAdapter, SendOpts } from "./types";
+import { spawn, type ChildProcess } from "child_process";
+import type {
+  AgentEvent,
+  AgentSession,
+  ContextUsage,
+  ModelOption,
+  ProviderAdapter,
+  SessionOpts,
+} from "./types";
 
 /**
- * Codex CLI adapter via `codex exec --json` (JSONL events on stdout).
- *
- * Phase 1: text streaming only, read-only sandbox. The JSONL event schema is
- * version-sensitive, so we parse defensively (handle both `msg`-wrapped and
- * flat shapes) and refine tool/approval handling in Phase 3.
+ * Codex session. Codex has no persistent streaming-input protocol wired here,
+ * so each turn spawns `codex exec --json`, resuming the prior session id for
+ * conversation continuity. Tools run inside Codex's sandbox (workspace-write).
  */
-export const codexAdapter: ProviderAdapter = {
-  id: "codex",
-  displayName: "Codex",
-  brandColor: "#19c37d",
+class CodexSession implements AgentSession {
+  private child: ChildProcess | null = null;
+  private sessionId?: string;
 
-  models(): ModelOption[] {
-    return [
-      { id: "", label: "Default" },
-      { id: "gpt-5-codex", label: "GPT-5 Codex" },
-      { id: "o3", label: "o3" },
-    ];
-  },
+  constructor(private opts: SessionOpts) {
+    this.sessionId = opts.resumeSessionId;
+  }
 
-  send(opts: SendOpts, onEvent: (e: AgentEvent) => void): Promise<void> {
-    const args = ["exec", "--json", "--skip-git-repo-check", "-C", opts.cwd];
-
-    // Sandbox: Phase 1 (no tools) → read-only. Phase 2 agentic → workspace-write.
-    args.push("-s", opts.toolsEnabled ? "workspace-write" : "read-only");
-    if (opts.model && opts.model !== "default") args.push("-m", opts.model);
-    if (opts.effort && opts.effort !== "default") {
-      args.push("-c", `model_reasoning_effort="${opts.effort}"`);
-    }
-    // Fast cold start: don't spin up MCP servers.
-    if (opts.fastStartup) args.push("-c", "mcp_servers={}");
-
-    // Resume a prior session for a continuous conversation.
-    if (opts.sessionId) {
-      args.splice(1, 0, "resume", opts.sessionId);
-      // → ["exec","resume","<id>","--json",...]
-    }
+  send(message: string, onEvent: (e: AgentEvent) => void): Promise<void> {
+    const o = this.opts;
+    const args = ["exec", "--json", "--skip-git-repo-check", "-C", o.cwd];
+    if (this.sessionId) args.splice(1, 0, "resume", this.sessionId);
+    args.push("-s", o.toolsEnabled ? "workspace-write" : "read-only");
+    if (o.model && o.model !== "default") args.push("-m", o.model);
+    if (o.effort && o.effort !== "default") args.push("-c", `model_reasoning_effort="${o.effort}"`);
+    if (o.fastStartup) args.push("-c", "mcp_servers={}");
 
     return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const finish = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        opts.signal.removeEventListener("abort", onAbort);
-        fn();
-      };
-
-      const child = spawn(opts.cli.bin, args, {
-        cwd: opts.cwd,
-        env: { ...process.env, PATH: opts.cli.pathEnv },
+      const child = spawn(o.cli.bin, args, {
+        cwd: o.cwd,
+        env: { ...process.env, PATH: o.cli.pathEnv },
       });
-
-      const onAbort = () => {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* ignore */
-        }
-      };
-      if (opts.signal.aborted) onAbort();
-      opts.signal.addEventListener("abort", onAbort);
+      this.child = child;
 
       let buf = "";
       let stderr = "";
-      let sessionId: string | undefined;
       let streamed = false;
       let finalText = "";
 
-      child.on("error", (err) => finish(() => reject(err)));
+      child.on("error", (err) => reject(err));
 
-      child.stdout.on("data", (chunk: Buffer | string) => {
+      child.stdout?.on("data", (chunk: Buffer | string) => {
         buf += chunk.toString();
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -87,9 +59,8 @@ export const codexAdapter: ProviderAdapter = {
           }
           const msg = (obj.msg ?? obj) as Record<string, unknown>;
           const type = String(msg.type ?? "");
-
           const sid = (obj.session_id ?? msg.session_id) as string | undefined;
-          if (sid) sessionId = sid;
+          if (sid) this.sessionId = sid;
 
           if (type === "agent_message_delta" && typeof msg.delta === "string") {
             streamed = true;
@@ -99,8 +70,7 @@ export const codexAdapter: ProviderAdapter = {
           } else if (type === "agent_message" && typeof msg.message === "string") {
             finalText = msg.message;
           } else if (type === "exec_command_begin") {
-            // Codex runs shell commands inside its sandbox (workspace-write).
-            const id = String(msg.call_id ?? msg.id ?? `cx-${Date.now()}`);
+            const id = String(msg.call_id ?? msg.id ?? "cx");
             const command = Array.isArray(msg.command)
               ? (msg.command as unknown[]).join(" ")
               : String(msg.command ?? "");
@@ -131,31 +101,59 @@ export const codexAdapter: ProviderAdapter = {
         }
       });
 
-      child.stderr.on("data", (d: Buffer | string) => {
-        stderr += d.toString();
+      child.stderr?.on("data", (d: Buffer | string) => (stderr += d.toString()));
+
+      child.on("close", (code) => {
+        this.child = null;
+        if (code !== 0 && code !== null) {
+          const m = stderr.trim() || `codex exited with code ${code}`;
+          onEvent({ kind: "error", message: m });
+          // Don't hard-reject on non-zero (e.g. interrupted) — end the turn.
+        }
+        if (!streamed && finalText) onEvent({ kind: "text-delta", text: finalText });
+        onEvent({ kind: "turn-end", sessionId: this.sessionId });
+        resolve();
       });
 
-      child.on("close", (code) =>
-        finish(() => {
-          if (opts.signal.aborted) {
-            reject(makeAbortError());
-          } else if (code !== 0) {
-            const m = stderr.trim() || `codex exited with code ${code ?? "null"}`;
-            onEvent({ kind: "error", message: m });
-            reject(new Error(m));
-          } else {
-            if (!streamed && finalText) onEvent({ kind: "text-delta", text: finalText });
-            onEvent({ kind: "turn-end", sessionId });
-            resolve();
-          }
-        })
-      );
-
-      child.stdin.on("error", () => {
-        /* broken pipe — handled via close/error */
+      child.stdin?.on("error", () => {
+        /* broken pipe — handled via close */
       });
-      child.stdin.write(opts.message);
-      child.stdin.end();
+      child.stdin?.write(message);
+      child.stdin?.end();
     });
+  }
+
+  interrupt(): void {
+    try {
+      this.child?.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  dispose(): void {
+    this.interrupt();
+  }
+
+  async contextUsage(): Promise<ContextUsage | null> {
+    return null;
+  }
+}
+
+export const codexAdapter: ProviderAdapter = {
+  id: "codex",
+  displayName: "Codex",
+  brandColor: "#19c37d",
+
+  models(): ModelOption[] {
+    return [
+      { id: "", label: "Default" },
+      { id: "gpt-5-codex", label: "GPT-5 Codex" },
+      { id: "o3", label: "o3" },
+    ];
+  },
+
+  createSession(opts: SessionOpts): AgentSession {
+    return new CodexSession(opts);
   },
 };

@@ -14,8 +14,14 @@ import type MarioverseAgentPlugin from "./main";
 import { resolveCli, describeError, isAbort } from "./cli";
 import { claudeAdapter } from "./providers/claude";
 import { codexAdapter } from "./providers/codex";
-import type { AgentEvent, ProviderAdapter, ProviderId } from "./providers/types";
-import { toolMeta, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
+import type {
+  AgentEvent,
+  AgentSession,
+  ContextUsage,
+  ProviderAdapter,
+  ProviderId,
+} from "./providers/types";
+import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
 
 export const VIEW_TYPE = "marioverse-agent-view";
 
@@ -71,7 +77,12 @@ interface AssistantCtx {
   curTextSeg: { t: "text"; md: string } | null;
   curRaw: string;
   fullText: string;
+  userText: string;
   thinkingEl: HTMLElement | null;
+  reasonEl: HTMLElement | null;
+  reasonBody: HTMLElement | null;
+  reasonRaw: string;
+  sources: Set<string>;
 }
 
 let convoSeed = 0;
@@ -81,8 +92,11 @@ export class ChatView extends ItemView {
   private model: string;
   private sessionId?: string;
   private streaming = false;
-  private abort?: AbortController;
   private sessionAllow = new Set<string>();
+
+  private session: AgentSession | null = null;
+  private sessionSig = "";
+  private usageEl: HTMLElement | null = null;
 
   private convos: Convo[] = [];
   private active!: Convo;
@@ -133,11 +147,51 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    try {
-      this.abort?.abort();
-    } catch {
-      /* ignore abort of an already-settled controller */
-    }
+    this.dropSession();
+  }
+
+  /* --------------------------- session mgmt ------------------------- */
+
+  private sessionSigOf(): string {
+    const s = this.plugin.settings;
+    return [
+      this.provider,
+      this.model,
+      s.effort,
+      s.toolsEnabled,
+      s.permissionMode,
+      s.fastStartup,
+      s.systemPrompt,
+      this.active?.id,
+    ].join("|");
+  }
+
+  private async ensureSession(): Promise<AgentSession> {
+    const sig = this.sessionSigOf();
+    if (this.session && sig === this.sessionSig) return this.session;
+    this.session?.dispose();
+    const s = this.plugin.settings;
+    const bin = this.provider === "claude" ? s.claudeBin : s.codexBin;
+    const cli = await resolveCli(this.provider, bin);
+    this.session = ADAPTERS[this.provider].createSession({
+      cli,
+      model: this.model,
+      effort: s.effort,
+      systemPrompt: s.systemPrompt || undefined,
+      cwd: this.vaultPath(),
+      permissionMode: s.permissionMode,
+      toolsEnabled: s.toolsEnabled,
+      fastStartup: s.fastStartup,
+      resumeSessionId: this.active.sessionId,
+    });
+    this.sessionSig = sig;
+    return this.session;
+  }
+
+  private dropSession(): void {
+    this.session?.dispose();
+    this.session = null;
+    this.sessionSig = "";
   }
 
   /* ----------------------------- header ----------------------------- */
@@ -169,7 +223,10 @@ export class ChatView extends ItemView {
     this.provider = this.provider === "claude" ? "codex" : "claude";
     this.model = this.provider === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel;
     this.sessionId = undefined;
+    this.active.sessionId = undefined;
     this.sessionAllow.clear();
+    this.dropSession();
+    this.updateUsage(null);
     this.refreshProviderUI();
   }
 
@@ -284,7 +341,7 @@ export class ChatView extends ItemView {
 
   private newConversation(): void {
     if (this.galleryEl) this.hideGallery();
-    if (this.streaming) this.abort?.abort();
+    this.dropSession();
     this.saveActive();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
     const c = this.makeConvo();
@@ -295,7 +352,8 @@ export class ChatView extends ItemView {
 
   private switchTo(c: Convo): void {
     if (c === this.active) return;
-    if (this.streaming) this.abort?.abort();
+    this.dropSession();
+    this.updateUsage(null);
     this.saveActive();
     if (!this.convos.includes(this.active)) this.convos.push(this.active);
     this.active = c;
@@ -517,6 +575,21 @@ export class ChatView extends ItemView {
       s.permissionMode = perm.value as typeof s.permissionMode;
       void this.plugin.saveSettings();
     };
+
+    tb.createDiv({ cls: "mva-spacer" }).style.flex = "1";
+    this.usageEl = tb.createDiv({ cls: "mva-usage", attr: { "aria-label": "Context used" } });
+  }
+
+  private updateUsage(u: ContextUsage | null): void {
+    if (!this.usageEl) return;
+    if (!u || !u.total) {
+      this.usageEl.setText("");
+      this.usageEl.removeClass("is-warn");
+      return;
+    }
+    const pct = Math.min(100, Math.round((u.used / u.total) * 100));
+    this.usageEl.setText(`${pct}% ctx`);
+    this.usageEl.toggleClass("is-warn", pct >= 80);
   }
 
   private toolbarSelect(parent: HTMLElement, label: string, opts: [string, string][]): HTMLSelectElement {
@@ -614,14 +687,17 @@ export class ChatView extends ItemView {
   /** Rebuild a conversation's DOM from its persisted messages. */
   private renderConvoDom(c: Convo): void {
     c.listEl.empty();
+    let lastUser = "";
     for (const m of c.messages) {
       if (m.role === "user") {
+        lastUser = m.text;
         const el = c.listEl.createDiv({ cls: "mva-turn mva-user" });
         void MarkdownRenderer.render(this.app, m.text, el.createDiv({ cls: "mva-bubble" }), "", this);
       } else {
         const el = c.listEl.createDiv({ cls: "mva-turn mva-assistant" });
         const body = el.createDiv({ cls: "mva-assistant-body" });
         let full = "";
+        const sources = new Set<string>();
         for (const s of m.segments) {
           if (s.t === "text") {
             void MarkdownRenderer.render(this.app, s.md, body.createDiv({ cls: "mva-bubble" }), "", this);
@@ -629,9 +705,12 @@ export class ChatView extends ItemView {
           } else {
             const refs = this.createToolCard(body, s.name, s.input);
             this.finishToolCard(refs, s.ok !== false, s.output);
+            const fp = toolFilePath(s.name, s.input);
+            if (fp && s.name === "Read") sources.add(fp);
           }
         }
-        if (full.trim()) this.attachActions(el, full);
+        this.attachSources(el, sources);
+        if (full.trim()) this.attachActions(el, full, lastUser || undefined);
       }
     }
   }
@@ -645,7 +724,7 @@ export class ChatView extends ItemView {
     this.scrollToBottom();
   }
 
-  private addAssistantTurn(): AssistantCtx {
+  private addAssistantTurn(userText: string): AssistantCtx {
     this.clearEmptyState();
     const el = this.listEl.createDiv({ cls: "mva-turn mva-assistant" });
     const bodyEl = el.createDiv({ cls: "mva-assistant-body" });
@@ -663,10 +742,30 @@ export class ChatView extends ItemView {
       curTextSeg: null,
       curRaw: "",
       fullText: "",
+      userText,
       thinkingEl: thinking,
+      reasonEl: null,
+      reasonBody: null,
+      reasonRaw: "",
+      sources: new Set(),
     };
     this.scrollToBottom();
     return ctx;
+  }
+
+  private appendReasoning(ctx: AssistantCtx, text: string): void {
+    this.dropThinking(ctx);
+    if (!ctx.reasonEl) {
+      const block = ctx.bodyEl.createDiv({ cls: "mva-reason is-collapsed" });
+      const head = block.createDiv({ cls: "mva-reason-head" });
+      setIcon(head.createSpan({ cls: "mva-reason-chevron" }), "chevron-right");
+      head.createSpan({ cls: "mva-reason-label", text: "Reasoning" });
+      head.onclick = () => block.toggleClass("is-collapsed", !block.hasClass("is-collapsed"));
+      ctx.reasonBody = block.createDiv({ cls: "mva-reason-body" });
+      ctx.reasonEl = block;
+    }
+    ctx.reasonRaw += text;
+    ctx.reasonBody?.setText(ctx.reasonRaw);
   }
 
   private dropThinking(ctx: AssistantCtx): void {
@@ -715,7 +814,7 @@ export class ChatView extends ItemView {
     this.renderText(ctx, false);
   }
 
-  private attachActions(turnEl: HTMLElement, text: string): void {
+  private attachActions(turnEl: HTMLElement, text: string, retryText?: string): void {
     const bar = turnEl.createDiv({ cls: "mva-actions" });
 
     const copy = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Copy" } });
@@ -728,6 +827,26 @@ export class ChatView extends ItemView {
     const insert = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Insert into note" } });
     setIcon(insert, "file-down");
     insert.onclick = () => void this.insertIntoNote(text, insert);
+
+    if (retryText) {
+      const retry = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Retry" } });
+      setIcon(retry, "refresh-cw");
+      retry.onclick = () => {
+        if (this.streaming) return;
+        void this.runTurn(retryText);
+      };
+    }
+  }
+
+  /** Render a clickable "Sources" footer from the notes the agent read. */
+  private attachSources(turnEl: HTMLElement, sources: Set<string>): void {
+    if (sources.size === 0) return;
+    const bar = turnEl.createDiv({ cls: "mva-sources" });
+    bar.createSpan({ cls: "mva-sources-label", text: "Sources" });
+    for (const path of sources) {
+      const chip = bar.createSpan({ cls: "mva-source-chip", text: path.split("/").pop() ?? path });
+      chip.onclick = () => this.openNote(path);
+    }
   }
 
   private flashIcon(btn: HTMLElement, on: string, off: string): void {
@@ -875,38 +994,45 @@ export class ChatView extends ItemView {
   }
 
   private stop(): void {
-    this.abort?.abort();
+    this.session?.interrupt();
   }
 
-  private async send(): Promise<void> {
+  private send(): void {
     const text = this.inputEl.value.trim();
     if (!text || this.streaming) return;
     this.inputEl.value = "";
     this.autoGrow();
+    void this.runTurn(text);
+  }
 
+  private async runTurn(text: string): Promise<void> {
+    if (this.streaming) return;
     const paths = this.contextPaths();
     const message = paths.length
       ? `Context notes:\n${paths.map((p) => `- ${p}`).join("\n")}\n\n${text}`
       : text;
 
     this.addUserTurn(text);
-    const ctx = this.addAssistantTurn();
-
-    this.abort = new AbortController();
+    const ctx = this.addAssistantTurn(text);
     this.setStreaming(true);
 
     const adapter = ADAPTERS[this.provider];
     const s = this.plugin.settings;
-    const bin = this.provider === "claude" ? s.claudeBin : s.codexBin;
 
     const onEvent = (e: AgentEvent) => {
       switch (e.kind) {
         case "text-delta":
           this.appendText(ctx, e.text);
           break;
-        case "tool-call-start":
-          this.addToolCard(ctx, e.id, e.name, e.input);
+        case "thinking-delta":
+          this.appendReasoning(ctx, e.text);
           break;
+        case "tool-call-start": {
+          this.addToolCard(ctx, e.id, e.name, e.input);
+          const fp = toolFilePath(e.name, e.input);
+          if (fp && e.name === "Read") ctx.sources.add(fp);
+          break;
+        }
         case "tool-call-result":
           this.resolveToolCard(ctx, e.id, e.ok, e.output);
           break;
@@ -917,42 +1043,34 @@ export class ChatView extends ItemView {
             this.addPermissionCard(ctx, e.tool, e.input, e.resolve);
           }
           break;
+        case "usage":
+          this.updateUsage(e.usage);
+          break;
         case "turn-end":
-          if (e.sessionId) this.sessionId = e.sessionId;
+          if (e.sessionId) {
+            this.sessionId = e.sessionId;
+            this.active.sessionId = e.sessionId;
+          }
           break;
         case "error":
           this.dropThinking(ctx);
           ctx.curTextEl = null;
           ctx.curTextSeg = null;
-          ctx.bodyEl.createDiv({ cls: "mva-inline-error", text: `⚠️ ${e.message}` });
+          this.renderError(ctx, e.message);
           break;
       }
     };
 
     try {
-      const cli = await resolveCli(this.provider, bin);
-      await adapter.send(
-        {
-          cli,
-          model: this.model,
-          effort: s.effort,
-          systemPrompt: s.systemPrompt || undefined,
-          message,
-          sessionId: this.sessionId,
-          cwd: this.vaultPath(),
-          permissionMode: s.permissionMode,
-          toolsEnabled: s.toolsEnabled,
-          fastStartup: s.fastStartup,
-          signal: this.abort.signal,
-        },
-        onEvent
-      );
+      const session = await this.ensureSession();
+      await session.send(message, onEvent);
       this.flushRender(ctx);
-      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText);
+      this.attachSources(ctx.el, ctx.sources);
+      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text);
     } catch (err) {
       this.flushRender(ctx);
+      this.dropSession(); // a failed turn likely poisoned the session
       if (isAbort(err)) {
-        this.dropThinking(ctx);
         ctx.el.addClass("mva-aborted");
         if (!ctx.fullText && ctx.cards.size === 0) {
           ctx.bodyEl.createSpan({ cls: "mva-faint", text: "Stopped." });
@@ -960,19 +1078,39 @@ export class ChatView extends ItemView {
       } else {
         this.dropThinking(ctx);
         const msg = describeError(err, adapter.displayName);
-        if (!ctx.bodyEl.querySelector(".mva-inline-error")) {
-          ctx.bodyEl.createDiv({ cls: "mva-inline-error", text: `⚠️ ${msg}` });
-        }
+        if (!ctx.bodyEl.querySelector(".mva-inline-error, .mva-onboard")) this.renderError(ctx, msg);
         new Notice(msg);
       }
     } finally {
       if (ctx.segments.length) this.active.messages.push({ role: "assistant", segments: ctx.segments });
       this.active.updatedAt = Date.now();
       this.setStreaming(false);
-      this.abort = undefined;
       this.persist();
       this.scrollToBottom();
     }
+  }
+
+  /** Inline error, upgraded to a setup card when the CLI isn't ready. */
+  private renderError(ctx: AssistantCtx, message: string): void {
+    if (/not found|not logged in|sign in|run it once/i.test(message)) {
+      const card = ctx.bodyEl.createDiv({ cls: "mva-onboard" });
+      setIcon(card.createDiv({ cls: "mva-onboard-icon" }), "plug-zap");
+      card.createDiv({ cls: "mva-onboard-title", text: `${ADAPTERS[this.provider].displayName} isn't ready` });
+      card.createDiv({ cls: "mva-onboard-msg", text: message });
+      const steps = card.createEl("ol", { cls: "mva-onboard-steps" });
+      steps.createEl("li", { text: `Open a terminal and run \`${this.provider}\` once to sign in.` });
+      steps.createEl("li", { text: "If it's installed elsewhere, set the binary path in settings." });
+      const btn = card.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Open settings" });
+      btn.onclick = () => this.openSettings();
+      return;
+    }
+    ctx.bodyEl.createDiv({ cls: "mva-inline-error", text: `⚠️ ${message}` });
+  }
+
+  private openSettings(): void {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById("marioverse-agent");
   }
 
   private vaultPath(): string {

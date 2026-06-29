@@ -771,6 +771,127 @@
   color: var(--text-faint);
 }
 
+/* ----------------------------- reasoning ------------------------------ */
+.mva-reason {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r2);
+  background: color-mix(in srgb, var(--text-normal) 2%, transparent);
+  font-size: 12px;
+}
+.mva-reason-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+}
+.mva-reason-head:hover {
+  color: var(--text-normal);
+}
+.mva-reason-chevron {
+  display: inline-flex;
+  transition: transform var(--mva-t);
+}
+.mva-reason-chevron .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.mva-reason:not(.is-collapsed) .mva-reason-chevron {
+  transform: rotate(90deg);
+}
+.mva-reason-label {
+  font-weight: 600;
+}
+.mva-reason-body {
+  padding: 0 9px 9px 24px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  line-height: 1.5;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.mva-reason.is-collapsed .mva-reason-body {
+  display: none;
+}
+
+/* ------------------------------- usage -------------------------------- */
+.mva-usage {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.mva-usage.is-warn {
+  color: var(--color-orange, #e0a341);
+}
+
+/* ------------------------------ sources ------------------------------- */
+.mva-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.mva-sources-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+.mva-source-chip {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--mva-r1);
+  padding: 2px 7px;
+  cursor: pointer;
+  font-family: var(--font-monospace);
+  transition: color var(--mva-t), border-color var(--mva-t);
+}
+.mva-source-chip:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+/* ----------------------------- onboarding ----------------------------- */
+.mva-onboard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-orange, #e0a341) 30%, var(--background-modifier-border));
+  border-radius: var(--mva-r2);
+}
+.mva-onboard-icon {
+  display: inline-flex;
+  color: var(--color-orange, #e0a341);
+}
+.mva-onboard-title {
+  font-weight: 650;
+  color: var(--text-normal);
+}
+.mva-onboard-msg {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.mva-onboard-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mva-onboard .mva-btn-primary {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
 /* ------------------------------ keyframes ----------------------------- */
 @keyframes mva-spin {
   to {

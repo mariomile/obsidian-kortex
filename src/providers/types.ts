@@ -31,10 +31,17 @@ export type AgentEvent =
       input: unknown;
       resolve: (d: PermissionDecision) => void;
     }
+  | { kind: "usage"; usage: ContextUsage }
   | { kind: "turn-end"; sessionId?: string }
   | { kind: "error"; message: string };
 
-export interface SendOpts {
+export interface ContextUsage {
+  used: number;
+  total: number;
+}
+
+/** Everything fixed for the lifetime of a conversation session. */
+export interface SessionOpts {
   cli: ResolvedCli;
   /** Model id, or "" / "default" for the CLI's configured default. */
   model: string;
@@ -42,19 +49,31 @@ export interface SendOpts {
   effort: string;
   /** Optional system prompt override. */
   systemPrompt?: string;
-  /** The user's message text. */
-  message: string;
-  /** Previous session id to resume, if any (continuous conversation). */
-  sessionId?: string;
   /** Working directory for the agent — the vault root. */
   cwd: string;
-  /** Permission posture. Phase 1 chat ignores tools entirely. */
   permissionMode: PermissionMode;
   /** Whether tools (Read/Write/Edit/Bash/…) are enabled at all. */
   toolsEnabled: boolean;
   /** Skip global hooks + MCP servers for faster cold start. */
   fastStartup: boolean;
-  signal: AbortSignal;
+  /** Resume a prior on-disk session id when (re)creating the session. */
+  resumeSessionId?: string;
+}
+
+/**
+ * A live conversation. For Claude this wraps a single long-lived SDK `query()`
+ * in streaming-input mode — follow-up turns reuse the same process/context
+ * (no per-message cold start). For Codex it spawns `codex exec` per turn.
+ */
+export interface AgentSession {
+  /** Send one user turn; resolves when that turn completes. */
+  send(message: string, onEvent: (e: AgentEvent) => void): Promise<void>;
+  /** Interrupt the in-flight turn. */
+  interrupt(): void;
+  /** Tear down the session (kills any live process). */
+  dispose(): void;
+  /** Current context-window usage, if the provider exposes it. */
+  contextUsage(): Promise<ContextUsage | null>;
 }
 
 export interface ProviderAdapter {
@@ -63,6 +82,5 @@ export interface ProviderAdapter {
   /** Fixed brand accent, theme-independent. */
   brandColor: string;
   models(): ModelOption[];
-  /** Stream a turn. Resolves when the turn completes; rejects on error/abort. */
-  send(opts: SendOpts, onEvent: (e: AgentEvent) => void): Promise<void>;
+  createSession(opts: SessionOpts): AgentSession;
 }
