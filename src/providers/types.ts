@@ -60,6 +60,8 @@ export interface SessionOpts {
   resumeSessionId?: string;
   /** In-process Obsidian MCP server (createSdkMcpServer return). Claude only. */
   obsidianServer?: unknown;
+  /** Disable built-in file tools so the agent uses Obsidian-native ones. */
+  nativeFirst?: boolean;
   /** Vault `_system/` memory preamble appended to the system prompt. */
   memoryPreamble?: string;
 }

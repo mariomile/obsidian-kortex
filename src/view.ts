@@ -190,6 +190,7 @@ export class ChatView extends ItemView {
       s.fastStartup,
       s.systemPrompt,
       s.obsidianToolsEnabled,
+      s.nativeFirst,
       s.memoryReadEnabled,
       c.id,
     ].join("|");
@@ -224,6 +225,7 @@ export class ChatView extends ItemView {
       fastStartup: s.fastStartup,
       resumeSessionId: c.sessionId,
       obsidianServer: useObsidian ? this.obsidianServer : undefined,
+      nativeFirst: useObsidian && s.nativeFirst,
       memoryPreamble,
     });
     c.sessionSig = sig;

@@ -19,6 +19,7 @@ export interface MVASettings {
   fastStartup: boolean;
   // Obsidian-native (Claude). All optional/toggleable.
   obsidianToolsEnabled: boolean;
+  nativeFirst: boolean;
   memoryReadEnabled: boolean;
   memoryWriteEnabled: boolean;
   featureSurfacing: boolean;
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   autoAllowRead: true,
   fastStartup: true,
   obsidianToolsEnabled: true,
+  nativeFirst: false,
   memoryReadEnabled: true,
   memoryWriteEnabled: true,
   featureSurfacing: true,
@@ -210,6 +212,11 @@ export class MVASettingTab extends PluginSettingTab {
       "Obsidian tools",
       "Give the agent native tools (search, read, backlinks, neighborhood, create/edit notes, frontmatter) alongside the standard ones.",
       "obsidianToolsEnabled"
+    );
+    toggle(
+      "Native-first",
+      "Disable the built-in file tools (Read/Grep/Glob/LS/Edit/Write) so the agent uses only the Obsidian-native tools for vault work. Bash stays available (gated).",
+      "nativeFirst"
     );
     toggle(
       "Read vault memory",

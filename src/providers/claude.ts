@@ -8,6 +8,9 @@ import type {
   SessionOpts,
 } from "./types";
 
+/** Built-in file tools disabled in "native-first" mode (use Obsidian tools). */
+const NATIVE_FIRST_DISALLOW = ["Read", "Grep", "Glob", "LS", "Edit", "MultiEdit", "Write", "NotebookEdit"];
+
 /** All standard tools — denied when tools are off (pure chat). */
 const ALL_TOOLS = [
   "Bash", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit",
@@ -100,6 +103,9 @@ class ClaudeSession implements AgentSession {
                     },
                   });
                 }),
+              ...(opts.nativeFirst && opts.obsidianServer
+                ? { disallowedTools: NATIVE_FIRST_DISALLOW }
+                : {}),
             }
           : { disallowedTools: ALL_TOOLS }),
       },
