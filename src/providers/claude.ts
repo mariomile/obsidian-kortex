@@ -57,11 +57,25 @@ class ClaudeSession implements AgentSession {
         ...(opts.effort && opts.effort !== "default"
           ? { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" }
           : {}),
-        ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+        ...(() => {
+          const sys = [opts.systemPrompt, opts.memoryPreamble].filter(Boolean).join("\n\n");
+          return sys ? { systemPrompt: sys } : {};
+        })(),
         ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
         pathToClaudeCodeExecutable: opts.cli.bin,
         includePartialMessages: true,
-        ...(opts.fastStartup ? { disableAllHooks: true, strictMcpConfig: true, mcpServers: {} } : {}),
+        // In-process Obsidian tools (if enabled). strictMcpConfig keeps only
+        // this server (no external MCP) for a fast, predictable cold start.
+        ...(opts.obsidianServer
+          ? {
+              mcpServers: {
+                obsidian: opts.obsidianServer as import("@anthropic-ai/claude-agent-sdk").McpServerConfig,
+              },
+            }
+          : {}),
+        ...(opts.fastStartup
+          ? { disableAllHooks: true, strictMcpConfig: true, ...(opts.obsidianServer ? {} : { mcpServers: {} }) }
+          : {}),
         ...(opts.toolsEnabled
           ? {
               permissionMode: opts.permissionMode,

@@ -58,6 +58,10 @@ export interface SessionOpts {
   fastStartup: boolean;
   /** Resume a prior on-disk session id when (re)creating the session. */
   resumeSessionId?: string;
+  /** In-process Obsidian MCP server (createSdkMcpServer return). Claude only. */
+  obsidianServer?: unknown;
+  /** Vault `_system/` memory preamble appended to the system prompt. */
+  memoryPreamble?: string;
 }
 
 /**

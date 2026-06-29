@@ -11,13 +11,45 @@ export interface ToolMeta {
 
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
+/** Obsidian native tools whose target is a note path/link (for click-to-open). */
+const OBSIDIAN_NOTE_TOOLS = new Set([
+  "mcp__obsidian__read_note",
+  "mcp__obsidian__get_backlinks",
+  "mcp__obsidian__get_neighborhood",
+  "mcp__obsidian__append_to_note",
+  "mcp__obsidian__update_frontmatter",
+  "mcp__obsidian__add_links",
+  "mcp__obsidian__open_note",
+  "mcp__obsidian__create_note",
+]);
+
 /** The raw file path a tool operates on, if any (for click-to-open). */
 export function toolFilePath(name: string, input: unknown): string | undefined {
-  if (!FILE_TOOLS.has(name)) return undefined;
   const i = rec(input);
-  const p = asString(i.file_path || i.notebook_path);
-  return p || undefined;
+  if (FILE_TOOLS.has(name)) return asString(i.file_path || i.notebook_path) || undefined;
+  if (OBSIDIAN_NOTE_TOOLS.has(name)) {
+    return asString(i.target || i.path).replace(/^\[\[|\]\]$/g, "") || undefined;
+  }
+  return undefined;
 }
+
+const OBSIDIAN_META: Record<string, { icon: string; label: string; targetKey?: string }> = {
+  search_vault: { icon: "search", label: "Search vault", targetKey: "query" },
+  read_note: { icon: "file-text", label: "Read note", targetKey: "target" },
+  get_backlinks: { icon: "link", label: "Backlinks", targetKey: "target" },
+  get_neighborhood: { icon: "network", label: "Neighborhood", targetKey: "target" },
+  list_notes: { icon: "folder", label: "List notes", targetKey: "tag" },
+  list_tags: { icon: "tag", label: "List tags" },
+  get_active_context: { icon: "crosshair", label: "Active context" },
+  create_note: { icon: "file-plus", label: "Create note", targetKey: "path" },
+  append_to_note: { icon: "file-pen-line", label: "Append", targetKey: "target" },
+  update_frontmatter: { icon: "settings-2", label: "Frontmatter", targetKey: "target" },
+  add_links: { icon: "link", label: "Add links", targetKey: "target" },
+  open_note: { icon: "external-link", label: "Open note", targetKey: "target" },
+  capture_decision: { icon: "gavel", label: "Capture decision", targetKey: "title" },
+  log_session: { icon: "history", label: "Log session", targetKey: "title" },
+  capture_learning: { icon: "lightbulb", label: "Capture learning", targetKey: "title" },
+};
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
@@ -34,7 +66,17 @@ export function toolMeta(name: string, input: unknown): ToolMeta {
 
 function baseMeta(name: string, input: unknown): Omit<ToolMeta, "openPath"> {
   const i = rec(input);
-  // MCP tools arrive as mcp__server__tool
+  // Obsidian native tools (mcp__obsidian__<tool>)
+  if (name.startsWith("mcp__obsidian__")) {
+    const tool = name.slice("mcp__obsidian__".length);
+    const m = OBSIDIAN_META[tool];
+    if (m) {
+      const raw = m.targetKey ? asString(i[m.targetKey]).replace(/^\[\[|\]\]$/g, "") : "";
+      const target = m.targetKey === "target" || m.targetKey === "path" ? basename(raw) : truncate(raw, 50);
+      return { icon: m.icon, label: m.label, target };
+    }
+  }
+  // Other MCP tools arrive as mcp__server__tool
   if (name.startsWith("mcp__")) {
     const parts = name.split("__");
     return { icon: "plug", label: parts.slice(2).join(" ") || name, target: parts[1] ?? "" };

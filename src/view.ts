@@ -22,6 +22,10 @@ import type {
   ProviderId,
 } from "./providers/types";
 import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
+import { createObsidianToolServer, OBSIDIAN_READ_TOOLS, OBSIDIAN_MEMORY_TOOLS } from "./obsidian/tools";
+import { readBootContext } from "./obsidian/memory";
+import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
+import { renderNeighborhoodPanel, renderMiniGraph, wikilinkify, type TouchedNote } from "./ui/graph-view";
 
 export const VIEW_TYPE = "kortex-view";
 
@@ -83,6 +87,7 @@ interface AssistantCtx {
   reasonBody: HTMLElement | null;
   reasonRaw: string;
   sources: Set<string>;
+  touched: TouchedNote[];
 }
 
 let convoSeed = 0;
@@ -97,6 +102,9 @@ export class ChatView extends ItemView {
   private session: AgentSession | null = null;
   private sessionSig = "";
   private usageEl: HTMLElement | null = null;
+  private obsidianServer: unknown = null;
+  private memoryPreamble = "";
+  private neighborhoodEl: HTMLElement | null = null;
 
   private convos: Convo[] = [];
   private active!: Convo;
@@ -139,11 +147,19 @@ export class ChatView extends ItemView {
     root.empty();
     root.addClass("mva-root");
     this.buildHeader(root);
+    this.neighborhoodEl = root.createDiv({ cls: "mva-nb is-hidden" });
     this.listWrap = root.createDiv({ cls: "mva-list-wrap" });
     this.buildComposer(root);
     await this.restore();
     this.refreshContext();
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.refreshContext()));
+    this.refreshNeighborhood();
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.refreshContext();
+        this.refreshNeighborhood();
+        this.refreshSurfacing();
+      })
+    );
   }
 
   async onClose(): Promise<void> {
@@ -162,6 +178,8 @@ export class ChatView extends ItemView {
       s.permissionMode,
       s.fastStartup,
       s.systemPrompt,
+      s.obsidianToolsEnabled,
+      s.memoryReadEnabled,
       this.active?.id,
     ].join("|");
   }
@@ -173,6 +191,17 @@ export class ChatView extends ItemView {
     const s = this.plugin.settings;
     const bin = this.provider === "claude" ? s.claudeBin : s.codexBin;
     const cli = await resolveCli(this.provider, bin);
+
+    // Obsidian-native tools are Claude-only and require agentic (gated) mode.
+    const useObsidian = s.obsidianToolsEnabled && s.toolsEnabled && this.provider === "claude";
+    if (useObsidian && !this.obsidianServer) this.obsidianServer = createObsidianToolServer(this.app);
+
+    let memoryPreamble: string | undefined;
+    if (s.memoryReadEnabled && this.provider === "claude") {
+      if (!this.memoryPreamble) this.memoryPreamble = await readBootContext(this.app);
+      memoryPreamble = this.memoryPreamble || undefined;
+    }
+
     this.session = ADAPTERS[this.provider].createSession({
       cli,
       model: this.model,
@@ -183,6 +212,8 @@ export class ChatView extends ItemView {
       toolsEnabled: s.toolsEnabled,
       fastStartup: s.fastStartup,
       resumeSessionId: this.active.sessionId,
+      obsidianServer: useObsidian ? this.obsidianServer : undefined,
+      memoryPreamble,
     });
     this.sessionSig = sig;
     return this.session;
@@ -678,10 +709,53 @@ export class ChatView extends ItemView {
         this.autoGrow();
       };
     }
+    this.renderSurfacing(empty);
+  }
+
+  /** Surface notes related to the active note (toggleable). */
+  private renderSurfacing(empty: HTMLElement): void {
+    if (!this.plugin.settings.featureSurfacing) return;
+    const file = this.app.workspace.getActiveFile();
+    if (!file) return;
+    const related = relatedNotes(this.app, file, 5);
+    if (!related.length) return;
+    const wrap = empty.createDiv({ cls: "mva-surface" });
+    wrap.createDiv({ cls: "mva-surface-label", text: `Related to ${noteBasename(file.path)}` });
+    const row = wrap.createDiv({ cls: "mva-surface-chips" });
+    for (const p of related) {
+      const chip = row.createDiv({ cls: "mva-chip mva-surface-chip" });
+      setIcon(chip.createSpan({ cls: "mva-chip-icon" }), "file-text");
+      chip.createSpan({ cls: "mva-chip-label", text: noteBasename(p) });
+      chip.onclick = () => {
+        if (!this.manualAttached.includes(p)) this.manualAttached.push(p);
+        this.refreshContext();
+        this.inputEl.focus();
+      };
+    }
   }
 
   private clearEmptyState(): void {
     this.listEl.querySelector(".mva-empty")?.remove();
+  }
+
+  private refreshNeighborhood(): void {
+    if (!this.neighborhoodEl) return;
+    if (!this.plugin.settings.featureNeighborhood) {
+      this.neighborhoodEl.empty();
+      this.neighborhoodEl.toggleClass("is-hidden", true);
+      return;
+    }
+    renderNeighborhoodPanel(this.neighborhoodEl, this.app, this.app.workspace.getActiveFile(), (p) =>
+      this.openNote(p)
+    );
+  }
+
+  /** Re-render the empty state (surfacing) when the active note changes. */
+  private refreshSurfacing(): void {
+    if (this.listEl.querySelector(".mva-empty")) {
+      this.listEl.empty();
+      this.renderEmptyState();
+    }
   }
 
   /** Rebuild a conversation's DOM from its persisted messages. */
@@ -748,6 +822,7 @@ export class ChatView extends ItemView {
       reasonBody: null,
       reasonRaw: "",
       sources: new Set(),
+      touched: [],
     };
     this.scrollToBottom();
     return ctx;
@@ -790,8 +865,13 @@ export class ChatView extends ItemView {
   private renderText(ctx: AssistantCtx, streaming = false): void {
     if (!ctx.curTextEl) return;
     const el = ctx.curTextEl;
+    let md = ctx.curRaw || "";
+    // Wikilink-ify only on the final render, scoped to the notes touched this turn.
+    if (!streaming && this.plugin.settings.featureWikilinkify) {
+      md = wikilinkify(md, [...ctx.sources, ...ctx.touched.map((t) => t.path)]);
+    }
     el.empty();
-    void MarkdownRenderer.render(this.app, ctx.curRaw || "", el, "", this).then(() => {
+    void MarkdownRenderer.render(this.app, md, el, "", this).then(() => {
       if (streaming && el.isConnected) el.createSpan({ cls: "mva-caret" });
     });
   }
@@ -1030,19 +1110,28 @@ export class ChatView extends ItemView {
         case "tool-call-start": {
           this.addToolCard(ctx, e.id, e.name, e.input);
           const fp = toolFilePath(e.name, e.input);
-          if (fp && e.name === "Read") ctx.sources.add(fp);
+          if (fp) {
+            const writeTools = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links/;
+            const kind = writeTools.test(e.name) ? "write" : "read";
+            if (kind === "read") ctx.sources.add(fp);
+            if (!ctx.touched.some((t) => t.path === fp)) ctx.touched.push({ path: fp, kind });
+          }
           break;
         }
         case "tool-call-result":
           this.resolveToolCard(ctx, e.id, e.ok, e.output);
           break;
-        case "permission-request":
-          if ((s.autoAllowRead && READ_ONLY_TOOLS.has(e.tool)) || this.sessionAllow.has(e.tool)) {
+        case "permission-request": {
+          const isRead = READ_ONLY_TOOLS.has(e.tool) || OBSIDIAN_READ_TOOLS.has(e.tool);
+          if ((s.autoAllowRead && isRead) || this.sessionAllow.has(e.tool)) {
             e.resolve({ behavior: "allow" });
+          } else if (OBSIDIAN_MEMORY_TOOLS.has(e.tool) && !s.memoryWriteEnabled) {
+            e.resolve({ behavior: "deny", message: "Memory writing is disabled in Kortex settings." });
           } else {
             this.addPermissionCard(ctx, e.tool, e.input, e.resolve);
           }
           break;
+        }
         case "usage":
           this.updateUsage(e.usage);
           break;
@@ -1066,6 +1155,9 @@ export class ChatView extends ItemView {
       await session.send(message, onEvent);
       this.flushRender(ctx);
       this.attachSources(ctx.el, ctx.sources);
+      if (this.plugin.settings.featureMiniGraph && ctx.touched.length) {
+        renderMiniGraph(ctx.el.createDiv({ cls: "mva-graph-wrap" }), ctx.touched, (p) => this.openNote(p));
+      }
       if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text);
     } catch (err) {
       this.flushRender(ctx);

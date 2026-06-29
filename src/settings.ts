@@ -17,6 +17,14 @@ export interface MVASettings {
   permissionMode: PermissionMode;
   autoAllowRead: boolean;
   fastStartup: boolean;
+  // Obsidian-native (Claude). All optional/toggleable.
+  obsidianToolsEnabled: boolean;
+  memoryReadEnabled: boolean;
+  memoryWriteEnabled: boolean;
+  featureSurfacing: boolean;
+  featureNeighborhood: boolean;
+  featureWikilinkify: boolean;
+  featureMiniGraph: boolean;
 }
 
 export const DEFAULT_SETTINGS: MVASettings = {
@@ -32,6 +40,13 @@ export const DEFAULT_SETTINGS: MVASettings = {
   permissionMode: "default",
   autoAllowRead: true,
   fastStartup: true,
+  obsidianToolsEnabled: true,
+  memoryReadEnabled: true,
+  memoryWriteEnabled: true,
+  featureSurfacing: true,
+  featureNeighborhood: false,
+  featureWikilinkify: false,
+  featureMiniGraph: false,
 };
 
 export class MVASettingTab extends PluginSettingTab {
@@ -173,5 +188,42 @@ export class MVASettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+
+    new Setting(containerEl).setName("Obsidian-native").setHeading();
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "Graph- and memory-aware features. Native tools and memory are Claude-only; graph UI works for both providers.",
+    });
+
+    const toggle = (name: string, desc: string, key: keyof typeof this.plugin.settings) =>
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(desc)
+        .addToggle((t) =>
+          t.setValue(this.plugin.settings[key] as boolean).onChange(async (v) => {
+            (this.plugin.settings[key] as boolean) = v;
+            await this.plugin.saveSettings();
+          })
+        );
+
+    toggle(
+      "Obsidian tools",
+      "Give the agent native tools (search, read, backlinks, neighborhood, create/edit notes, frontmatter) alongside the standard ones.",
+      "obsidianToolsEnabled"
+    );
+    toggle(
+      "Read vault memory",
+      "Boot each conversation with context from _system/ (vault-context, preferences, rules, recent sessions).",
+      "memoryReadEnabled"
+    );
+    toggle(
+      "Write vault memory",
+      "Let the agent capture decisions, learnings, and session-log entries into _system/ (every write is permission-gated).",
+      "memoryWriteEnabled"
+    );
+    toggle("Surface related notes", "Show notes related to the active note in the empty state.", "featureSurfacing");
+    toggle("Neighborhood panel", "Collapsible backlinks/outgoing/related panel for the active note.", "featureNeighborhood");
+    toggle("Wikilink-ify replies", "Turn mentions of existing note titles in replies into clickable [[wikilinks]].", "featureWikilinkify");
+    toggle("Mini-graph", "Show a small graph of the notes the agent touched each turn.", "featureMiniGraph");
   }
 }

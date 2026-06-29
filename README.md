@@ -14,6 +14,12 @@ An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** 
 - **Reasoning** — the model's thinking streams into a collapsible block.
 - **Fast startup** — skips global hooks + MCP per turn for snappier responses (toggle in settings).
 - **Resilient** — a clear setup card when the CLI isn't signed in; retry any turn.
+
+### Obsidian-native (Claude; all toggleable in settings)
+
+- **Native tools** — an in-process MCP server gives the agent graph- and metadata-aware tools alongside the standard ones: `search_vault`, `read_note`, `get_backlinks`, `get_neighborhood`, `list_notes`, `list_tags`, `get_active_context`, `create_note` (tag/frontmatter aware), `append_to_note`, `update_frontmatter`, `add_links`, `open_note`.
+- **Vault memory** — boots each conversation with context from `_system/` (vault-context, preferences, active rules, recent sessions), and can write back via gated tools: `capture_decision`, `log_session`, `capture_learning` (tagged `created_by: kortex`).
+- **Graph in the UI** — surface notes related to the active note; a collapsible **neighborhood panel** (backlinks / links out / related); **wikilink-ify** replies (mentions of touched notes become clickable `[[links]]`); a **mini-graph** of the notes each turn read/wrote.
 - **Composer power-ups** — `/` opens a palette of custom prompts + your vault's `.claude/` commands and skills; `@` mentions a file or folder to add it as context. Footer selectors for **effort** (low→max) and **permission mode**.
 - **Context** — the active note is auto-attached as a removable chip; attach more notes via the "+ Note" picker or `@`.
 - **History** — conversations **persist to disk** (survive reload, with session resume). The history button opens a **card gallery** with per-conversation previews (title, snippet, provider, message count, date); click a card to reopen it. Copy any reply.
