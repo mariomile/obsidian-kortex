@@ -1,7 +1,7 @@
 {
   "id": "kortex",
   "name": "Kortex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.7.2",
   "description": "An agentic AI assistant in your sidebar, powered by the Claude or Codex CLI. Your vault becomes its working directory — with a refined, theme-aware chat UI.",
   "author": "Mario Miletta",
