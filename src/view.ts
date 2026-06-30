@@ -1236,7 +1236,7 @@ export class ChatView extends ItemView {
           }
         }
         this.attachSources(el, sources);
-        if (full.trim()) this.attachActions(el, full, lastUser || undefined);
+        if (full.trim()) this.attachActions(el, full, lastUser || undefined, c);
       }
     }
   }
@@ -1423,6 +1423,32 @@ export class ChatView extends ItemView {
     const fork = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Fork into new tab" } });
     setIcon(fork, "git-fork");
     fork.onclick = () => this.forkConversation(convo ?? this.active);
+
+    const rewind = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Rewind here (conversation only)" } });
+    setIcon(rewind, "undo-2");
+    rewind.onclick = () => this.rewindTo(convo ?? this.active, turnEl);
+  }
+
+  /** Conversation-only rewind: drop turns after this one and reset the session.
+   *  Files on disk are NOT touched (a safe, non-destructive rewind). */
+  private rewindTo(c: Convo, turnEl: HTMLElement): void {
+    if (c.streaming) {
+      new Notice("Stop the current turn before rewinding.");
+      return;
+    }
+    const turns = Array.from(c.listEl.querySelectorAll(".mva-turn"));
+    const idx = turns.indexOf(turnEl);
+    if (idx < 0) return;
+    c.messages = c.messages.slice(0, idx + 1);
+    for (let i = turns.length - 1; i > idx; i--) turns[i].remove();
+    this.dropSession(c); // next message starts a fresh session from this point
+    c.sessionId = undefined;
+    c.queue = [];
+    this.renderQueue(c);
+    c.updatedAt = Date.now();
+    this.updateUsage(null);
+    this.persist();
+    new Notice("Rewound the conversation. Files are unchanged; the session was reset.");
   }
 
   /** Render a clickable "Sources" footer from the notes the agent read. */
