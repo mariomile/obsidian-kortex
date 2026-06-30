@@ -1153,7 +1153,7 @@ export class ChatView extends ItemView {
       if (m.role === "user") {
         lastUser = m.text;
         const el = c.listEl.createDiv({ cls: "mva-turn mva-user" });
-        void MarkdownRenderer.render(this.app, m.text, el.createDiv({ cls: "mva-bubble" }), "", this);
+        void MarkdownRenderer.render(this.app, m.text, el.createDiv({ cls: "mva-bubble markdown-rendered" }), "", this);
       } else {
         const el = c.listEl.createDiv({ cls: "mva-turn mva-assistant" });
         const body = el.createDiv({ cls: "mva-assistant-body" });
@@ -1161,7 +1161,7 @@ export class ChatView extends ItemView {
         const sources = new Set<string>();
         for (const s of m.segments) {
           if (s.t === "text") {
-            void MarkdownRenderer.render(this.app, s.md, body.createDiv({ cls: "mva-bubble" }), "", this);
+            void MarkdownRenderer.render(this.app, s.md, body.createDiv({ cls: "mva-bubble markdown-rendered" }), "", this);
             full += s.md;
           } else {
             const refs = this.createToolCard(body, s.name, s.input);
@@ -1194,7 +1194,7 @@ export class ChatView extends ItemView {
         });
       }
     }
-    if (text) void MarkdownRenderer.render(this.app, text, bubble.createDiv(), "", this);
+    if (text) void MarkdownRenderer.render(this.app, text, bubble.createDiv({ cls: "markdown-rendered" }), "", this);
     this.scrollConvo(c);
   }
 
@@ -1253,7 +1253,7 @@ export class ChatView extends ItemView {
   private appendText(ctx: AssistantCtx, text: string): void {
     this.dropThinking(ctx);
     if (!ctx.curTextEl) {
-      ctx.curTextEl = ctx.bodyEl.createDiv({ cls: "mva-bubble" });
+      ctx.curTextEl = ctx.bodyEl.createDiv({ cls: "mva-bubble markdown-rendered" });
       ctx.curRaw = "";
       ctx.curTextSeg = { t: "text", md: "" };
       ctx.segments.push(ctx.curTextSeg);
@@ -1274,8 +1274,15 @@ export class ChatView extends ItemView {
     }
     el.empty();
     void MarkdownRenderer.render(this.app, md, el, "", this).then(() => {
+      // Keep at most one caret — on the element that's currently streaming.
+      this.clearCarets(ctx.convo.listEl);
       if (streaming && el.isConnected) el.createSpan({ cls: "mva-caret" });
     });
+  }
+
+  /** Remove every streaming caret in a conversation's list. */
+  private clearCarets(root: HTMLElement): void {
+    root.querySelectorAll(".mva-caret").forEach((c) => c.remove());
   }
 
   private scheduleRender(ctx: AssistantCtx): void {
@@ -1293,6 +1300,8 @@ export class ChatView extends ItemView {
       ctx.renderTimer = null;
     }
     this.renderText(ctx, false);
+    // Turns that end on a tool call have no curTextEl to re-render — clear directly.
+    this.clearCarets(ctx.convo.listEl);
   }
 
   private attachActions(turnEl: HTMLElement, text: string, retryText?: string, convo?: Convo): void {
