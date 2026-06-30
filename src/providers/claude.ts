@@ -22,9 +22,11 @@ const ALL_TOOLS = [
  * streaming-input mode. Follow-up turns push into the same input stream, so the
  * CLI process and context stay warm — no per-message cold start.
  */
+type UserContent = string | Array<Record<string, unknown>>;
+
 class ClaudeSession implements AgentSession {
   private q: Query;
-  private queue: { role: "user"; content: string }[] = [];
+  private queue: { role: "user"; content: UserContent }[] = [];
   private wake: (() => void) | null = null;
   private disposed = false;
   private onEvent: ((e: AgentEvent) => void) | null = null;
@@ -41,7 +43,7 @@ class ClaudeSession implements AgentSession {
     const self = this;
     async function* input(): AsyncGenerator<{
       type: "user";
-      message: { role: "user"; content: string };
+      message: { role: "user"; content: UserContent };
       parent_tool_use_id: null;
     }> {
       while (!self.disposed) {
@@ -201,16 +203,30 @@ class ClaudeSession implements AgentSession {
     else resolve?.();
   }
 
-  send(message: string, onEvent: (e: AgentEvent) => void): Promise<void> {
+  send(
+    message: string,
+    onEvent: (e: AgentEvent) => void,
+    images?: import("./types").ImageAttachment[]
+  ): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Session disposed."));
     // Guard against overlapping turns: a second send() while one is in flight would
     // orphan the first promise (its resolve/reject would be overwritten).
     if (this.resolveTurn) return Promise.reject(new Error("A turn is already in flight."));
     this.onEvent = onEvent;
+    const content: UserContent =
+      images && images.length
+        ? [
+            ...images.map((img) => ({
+              type: "image",
+              source: { type: "base64", media_type: img.mediaType, data: img.dataB64 },
+            })),
+            { type: "text", text: message },
+          ]
+        : message;
     return new Promise<void>((resolve, reject) => {
       this.resolveTurn = resolve;
       this.rejectTurn = reject;
-      this.queue.push({ role: "user", content: message });
+      this.queue.push({ role: "user", content });
       const w = this.wake;
       this.wake = null;
       w?.();
@@ -226,17 +242,26 @@ class ClaudeSession implements AgentSession {
     w?.();
   }
 
-  interrupt(): void {
-    // Unblock a pending permission first so the SDK can unwind and emit a result.
-    this.denyPending?.();
+  /** Call q.interrupt() and swallow both sync throws and promise rejections
+   *  (it rejects when the query has already ended — harmless). */
+  private safeInterrupt(): void {
     try {
-      void this.q.interrupt?.();
+      const p = this.q.interrupt?.();
+      if (p && typeof p.catch === "function") p.catch(() => {});
     } catch {
       /* ignore */
     }
   }
 
+  interrupt(): void {
+    if (this.disposed) return;
+    // Unblock a pending permission first so the SDK can unwind and emit a result.
+    this.denyPending?.();
+    this.safeInterrupt();
+  }
+
   dispose(): void {
+    if (this.disposed) return; // idempotent — dispose may be called more than once
     this.disposed = true;
     this.denyPending?.();
     try {
@@ -244,11 +269,7 @@ class ClaudeSession implements AgentSession {
     } catch {
       /* ignore */
     }
-    try {
-      void this.q.interrupt?.();
-    } catch {
-      /* ignore */
-    }
+    this.safeInterrupt();
     // The pump loop breaks on `disposed` without emitting a result, so settle here
     // to ensure any awaiting send() promise is released.
     this.settleTurn(new Error("Session disposed."));

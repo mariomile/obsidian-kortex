@@ -1,6 +1,10 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { Editor, FileSystemAdapter, MarkdownView, Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { ChatView, VIEW_TYPE } from "./view";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
+import { ADAPTERS } from "./providers/registry";
+import { resolveCli } from "./cli";
+import { InlineEditModal } from "./ui/inline-edit";
+import type { AgentEvent } from "./providers/types";
 
 export default class KortexPlugin extends Plugin {
   settings!: MVASettings;
@@ -41,6 +45,15 @@ export default class KortexPlugin extends Plugin {
       callback: withView((v) => v.cmdCompact()),
     });
 
+    this.addCommand({
+      id: "inline-edit",
+      name: "Inline edit selection",
+      editorCallback: (editor: Editor, ctx) => {
+        if (!(ctx instanceof MarkdownView)) return;
+        this.inlineEdit(editor);
+      },
+    });
+
     this.addSettingTab(new MVASettingTab(this.app, this));
   }
 
@@ -52,6 +65,67 @@ export default class KortexPlugin extends Plugin {
       await leaf?.setViewState({ type: VIEW_TYPE, active: true });
     }
     if (leaf) workspace.revealLeaf(leaf);
+  }
+
+  private vaultPath(): string {
+    const a = this.app.vault.adapter;
+    return a instanceof FileSystemAdapter ? a.getBasePath() : ".";
+  }
+
+  /** One-shot text transform: a transient (tool-less) session, returns the text. */
+  private async oneShot(instruction: string, text: string, signal: AbortSignal): Promise<string> {
+    const provider = this.settings.provider;
+    const bin = provider === "claude" ? this.settings.claudeBin : this.settings.codexBin;
+    const cli = await resolveCli(provider, bin);
+    const session = ADAPTERS[provider].createSession({
+      cli,
+      model: provider === "claude" ? this.settings.claudeModel : this.settings.codexModel,
+      effort: "default",
+      cwd: this.vaultPath(),
+      permissionMode: "default",
+      toolsEnabled: false, // pure text transform — no tools needed
+      fastStartup: true,
+    });
+    signal.addEventListener("abort", () => {
+      try {
+        session.dispose();
+      } catch {
+        /* already torn down */
+      }
+    });
+    let out = "";
+    const prompt =
+      "You are an inline text editor inside Obsidian. Apply the instruction to the TEXT and return ONLY " +
+      "the resulting text — no preamble, no explanation, no code fences, no quotes.\n\n" +
+      `Instruction: ${instruction}\n\nTEXT:\n${text}`;
+    try {
+      await session.send(prompt, (e: AgentEvent) => {
+        if (e.kind === "text-delta") out += e.text;
+      });
+    } finally {
+      session.dispose();
+    }
+    return out.trim();
+  }
+
+  private inlineEdit(editor: Editor): void {
+    const selection = editor.getSelection();
+    const text = selection || editor.getLine(editor.getCursor().line);
+    if (!text.trim()) {
+      new Notice("Select some text (or place the cursor on a non-empty line) to edit.");
+      return;
+    }
+    const hadSelection = selection.length > 0;
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    const line = editor.getCursor().line;
+    new InlineEditModal(this.app, text, (instr, t, sig) => this.oneShot(instr, t, sig), (next) => {
+      if (hadSelection) {
+        editor.replaceRange(next, from, to);
+      } else {
+        editor.replaceRange(next, { line, ch: 0 }, { line, ch: editor.getLine(line).length });
+      }
+    }).open();
   }
 
   async loadSettings(): Promise<void> {

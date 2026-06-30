@@ -12,13 +12,12 @@ import {
 import { Autocomplete, type AcItem } from "./ui/autocomplete";
 import type KortexPlugin from "./main";
 import { resolveCli, describeError, isAbort } from "./cli";
-import { claudeAdapter } from "./providers/claude";
-import { codexAdapter } from "./providers/codex";
+import { ADAPTERS } from "./providers/registry";
 import type {
   AgentEvent,
   AgentSession,
   ContextUsage,
-  ProviderAdapter,
+  ImageAttachment,
   ProviderId,
 } from "./providers/types";
 import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
@@ -30,13 +29,26 @@ import { renderCapabilitiesPanel } from "./ui/capabilities";
 
 export const VIEW_TYPE = "kortex-view";
 
-const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
-  claude: claudeAdapter,
-  codex: codexAdapter,
-};
-
 const MAX_CONVOS = 30;
 const MAX_PERSIST_OUTPUT = 2000;
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function extToMime(ext: string): string {
+  const e = ext.toLowerCase();
+  if (e === "jpg" || e === "jpeg") return "image/jpeg";
+  if (e === "gif") return "image/gif";
+  if (e === "webp") return "image/webp";
+  return "image/png";
+}
 
 interface ToolCard {
   card: HTMLElement;
@@ -76,7 +88,7 @@ interface Convo {
   streaming: boolean;
   stopped: boolean; // set by stop() so the turn renders as "Stopped", not an error
   pendingPerm: (() => void) | null; // cancels an open permission card on stop
-  queue: string[];
+  queue: { text: string; images?: ImageAttachment[] }[];
   pendingEl: HTMLElement | null; // container for queued-message chips
 }
 
@@ -138,6 +150,8 @@ export class ChatView extends ItemView {
   private contextEl!: HTMLElement;
   private excludeActiveNote = false;
   private manualAttached: string[] = [];
+  private pendingImages: ImageAttachment[] = [];
+  private imagesEl!: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, private plugin: KortexPlugin) {
     super(leaf);
@@ -710,12 +724,25 @@ export class ChatView extends ItemView {
     const bar = root.createDiv({ cls: "mva-composer" });
     this.composerEl = bar;
     this.contextEl = bar.createDiv({ cls: "mva-context" });
+    this.imagesEl = bar.createDiv({ cls: "mva-images is-hidden" });
     const row = bar.createDiv({ cls: "mva-input-row" });
     this.inputEl = row.createEl("textarea", {
       cls: "mva-input",
       attr: { rows: "2", placeholder: "Message the agent…   ⏎ send · ⇧⏎ newline" },
     });
     this.inputEl.addEventListener("input", () => this.autoGrow());
+    this.inputEl.addEventListener("paste", (e) => this.onPaste(e));
+    bar.addEventListener("dragover", (e) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+        bar.addClass("is-drop");
+      }
+    });
+    bar.addEventListener("dragleave", () => bar.removeClass("is-drop"));
+    bar.addEventListener("drop", (e) => {
+      bar.removeClass("is-drop");
+      this.onDrop(e);
+    });
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -732,6 +759,82 @@ export class ChatView extends ItemView {
     ]);
 
     this.buildToolbar(bar);
+  }
+
+  /* ----------------------------- images ----------------------------- */
+
+  private onPaste(e: ClipboardEvent): void {
+    const files = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f);
+    if (files.length) {
+      e.preventDefault();
+      void this.attachImages(files);
+    }
+  }
+
+  private onDrop(e: DragEvent): void {
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (files.length) {
+      e.preventDefault();
+      void this.attachImages(files);
+    }
+  }
+
+  private async attachImages(files: Blob[]): Promise<void> {
+    for (const f of files) {
+      try {
+        const buf = await f.arrayBuffer();
+        const dataB64 = arrayBufferToBase64(buf);
+        this.pendingImages.push({
+          mediaType: (f as File).type || "image/png",
+          dataB64,
+          name: (f as File).name || "pasted image",
+        });
+      } catch {
+        new Notice("Couldn't read an image.");
+      }
+    }
+    this.renderImageStrip();
+  }
+
+  /** Resolve `![[image]]` embeds in the text to base64 attachments (Obsidian-native). */
+  private async embeddedImages(text: string): Promise<ImageAttachment[]> {
+    const out: ImageAttachment[] = [];
+    const re = /!\[\[([^\]]+?\.(?:png|jpe?g|gif|webp))(?:\|[^\]]*)?\]\]/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      const f = this.app.metadataCache.getFirstLinkpathDest(m[1], "");
+      if (!f) continue;
+      try {
+        const buf = await this.app.vault.readBinary(f);
+        out.push({
+          mediaType: extToMime(f.extension),
+          dataB64: arrayBufferToBase64(buf),
+          name: f.name,
+        });
+      } catch {
+        /* skip unreadable */
+      }
+    }
+    return out;
+  }
+
+  private renderImageStrip(): void {
+    this.imagesEl.empty();
+    this.imagesEl.toggleClass("is-hidden", this.pendingImages.length === 0);
+    this.pendingImages.forEach((img, i) => {
+      const chip = this.imagesEl.createDiv({ cls: "mva-img-chip" });
+      const thumb = chip.createEl("img", { cls: "mva-img-thumb" });
+      thumb.src = `data:${img.mediaType};base64,${img.dataB64}`;
+      const x = chip.createSpan({ cls: "mva-img-x", attr: { "aria-label": "Remove image" } });
+      setIcon(x, "x");
+      x.onclick = () => {
+        this.pendingImages.splice(i, 1);
+        this.renderImageStrip();
+      };
+    });
   }
 
   /* --------------------------- autocomplete ------------------------- */
@@ -1073,15 +1176,25 @@ export class ChatView extends ItemView {
     }
   }
 
-  private addUserTurn(c: Convo, text: string): void {
+  private addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): void {
     this.clearEmptyState(c);
     if (c.title === "New chat") {
-      c.title = text.slice(0, 48);
+      c.title = text.slice(0, 48) || (images?.length ? "Image" : "New chat");
       this.renderTabs(); // reflect the new title in the tab
     }
     c.messages.push({ role: "user", text });
     const el = c.listEl.createDiv({ cls: "mva-turn mva-user" });
-    void MarkdownRenderer.render(this.app, text, el.createDiv({ cls: "mva-bubble" }), "", this);
+    const bubble = el.createDiv({ cls: "mva-bubble" });
+    if (images?.length) {
+      const strip = bubble.createDiv({ cls: "mva-bubble-images" });
+      for (const img of images) {
+        strip.createEl("img", {
+          cls: "mva-bubble-img",
+          attr: { src: `data:${img.mediaType};base64,${img.dataB64}` },
+        });
+      }
+    }
+    if (text) void MarkdownRenderer.render(this.app, text, bubble.createDiv(), "", this);
     this.scrollConvo(c);
   }
 
@@ -1390,15 +1503,18 @@ export class ChatView extends ItemView {
 
   private send(): void {
     const text = this.inputEl.value.trim();
-    if (!text) return;
+    if (!text && this.pendingImages.length === 0) return;
     this.inputEl.value = "";
     this.autoGrow();
+    const images = this.pendingImages.length ? this.pendingImages : undefined;
+    this.pendingImages = [];
+    this.renderImageStrip();
     const c = this.active;
     if (c.streaming) {
-      c.queue.push(text); // queue while a turn is running
+      c.queue.push({ text, images }); // queue while a turn is running
       this.renderQueue(c);
     } else {
-      void this.runTurn(c, text);
+      void this.runTurn(c, text, images);
     }
   }
 
@@ -1414,7 +1530,10 @@ export class ChatView extends ItemView {
     c.queue.forEach((q, i) => {
       const row = c.pendingEl!.createDiv({ cls: "mva-queued" });
       setIcon(row.createSpan({ cls: "mva-queued-icon" }), "clock");
-      row.createSpan({ cls: "mva-queued-text", text: q });
+      row.createSpan({
+        cls: "mva-queued-text",
+        text: q.text + (q.images?.length ? `  📎${q.images.length}` : ""),
+      });
       const x = row.createSpan({ cls: "mva-chip-x", attr: { "aria-label": "Remove" } });
       setIcon(x, "x");
       x.onclick = () => {
@@ -1425,13 +1544,25 @@ export class ChatView extends ItemView {
     this.scrollConvo(c);
   }
 
-  private async runTurn(c: Convo, text: string): Promise<void> {
+  private async runTurn(c: Convo, text: string, images?: ImageAttachment[]): Promise<void> {
     const paths = c === this.active ? this.contextPaths() : [];
     const message = paths.length
       ? `Context notes:\n${paths.map((p) => `- ${p}`).join("\n")}\n\n${text}`
       : text;
 
-    this.addUserTurn(c, text);
+    // Images are Claude-only; warn and drop for Codex.
+    let imgs = images;
+    if (imgs?.length && c.provider !== "claude") {
+      new Notice("Image attachments are supported on Claude — sending text only.");
+      imgs = undefined;
+    }
+    // Add any `![[image]]` embeds referenced in the text (Claude only).
+    if (c.provider === "claude") {
+      const embedded = await this.embeddedImages(text);
+      if (embedded.length) imgs = [...(imgs ?? []), ...embedded];
+    }
+
+    this.addUserTurn(c, text, imgs);
     const ctx = this.addAssistantTurn(c, text);
     c.stopped = false;
     this.setStreaming(c, true);
@@ -1518,7 +1649,7 @@ export class ChatView extends ItemView {
     try {
       bump();
       const session = await this.ensureSession(c);
-      await session.send(message, onEvent);
+      await session.send(message, onEvent, imgs);
       // Stop the watchdog before reading `timedOut` so a timer that fires in the
       // gap between send() resolving and `finally` can't trip a false timeout.
       if (watchdog !== null) {
@@ -1574,7 +1705,7 @@ export class ChatView extends ItemView {
       if (c.queue.length) {
         const next = c.queue.shift()!;
         this.renderQueue(c);
-        void this.runTurn(c, next);
+        void this.runTurn(c, next.text, next.images);
       }
     }
   }

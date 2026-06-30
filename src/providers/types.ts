@@ -41,6 +41,13 @@ export interface ContextUsage {
   total: number;
 }
 
+/** An image attached to a user turn (base64), for multimodal input. */
+export interface ImageAttachment {
+  mediaType: string; // e.g. "image/png"
+  dataB64: string; // base64, no data: prefix
+  name?: string;
+}
+
 /** Everything fixed for the lifetime of a conversation session. */
 export interface SessionOpts {
   cli: ResolvedCli;
@@ -76,7 +83,7 @@ export interface SessionOpts {
  */
 export interface AgentSession {
   /** Send one user turn; resolves when that turn completes. */
-  send(message: string, onEvent: (e: AgentEvent) => void): Promise<void>;
+  send(message: string, onEvent: (e: AgentEvent) => void, images?: ImageAttachment[]): Promise<void>;
   /** Interrupt the in-flight turn. */
   interrupt(): void;
   /** Compact the conversation context (best-effort; Claude supports /compact). */
