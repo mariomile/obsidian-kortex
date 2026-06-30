@@ -32,6 +32,9 @@ class ClaudeSession implements AgentSession {
   private rejectTurn: ((e: unknown) => void) | null = null;
   private sessionId?: string;
   private permSeed = 0;
+  /** Force-deny callback for an in-flight permission request, so interrupt/dispose
+   *  unblock the SDK (otherwise parked waiting for canUseTool to resolve → turn hangs). */
+  private denyPending: (() => void) | null = null;
 
   constructor(opts: SessionOpts) {
     this.sessionId = opts.resumeSessionId;
@@ -85,22 +88,30 @@ class ClaudeSession implements AgentSession {
               canUseTool: (toolName, toolInput, ctx) =>
                 new Promise((resolve) => {
                   const suggestions = ctx?.suggestions;
+                  let settled = false;
+                  const finish = (d: import("./types").PermissionDecision) => {
+                    if (settled) return;
+                    settled = true;
+                    this.denyPending = null;
+                    if (d.behavior === "allow") {
+                      resolve({
+                        behavior: "allow",
+                        updatedInput: toolInput,
+                        ...(d.remember && suggestions ? { updatedPermissions: suggestions } : {}),
+                      });
+                    } else {
+                      resolve({ behavior: "deny", message: d.message || "Denied by user." });
+                    }
+                  };
+                  // If the turn is interrupted/disposed while this is pending, deny so the
+                  // SDK can unwind and emit a result (instead of parking forever).
+                  this.denyPending = () => finish({ behavior: "deny", message: "Interrupted." });
                   this.onEvent?.({
                     kind: "permission-request",
                     id: `perm-${++this.permSeed}`,
                     tool: toolName,
                     input: toolInput,
-                    resolve: (d) => {
-                      if (d.behavior === "allow") {
-                        resolve({
-                          behavior: "allow",
-                          updatedInput: toolInput,
-                          ...(d.remember && suggestions ? { updatedPermissions: suggestions } : {}),
-                        });
-                      } else {
-                        resolve({ behavior: "deny", message: d.message || "Denied by user." });
-                      }
-                    },
+                    resolve: finish,
                   });
                 }),
               ...(opts.nativeFirst && opts.obsidianServer
@@ -122,10 +133,9 @@ class ClaudeSession implements AgentSession {
       }
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
+      this.denyPending?.();
       this.onEvent?.({ kind: "error", message: m });
-      const reject = this.rejectTurn;
-      this.resolveTurn = this.rejectTurn = null;
-      reject?.(err instanceof Error ? err : new Error(m));
+      this.settleTurn(err instanceof Error ? err : new Error(m));
     }
   }
 
@@ -168,9 +178,7 @@ class ClaudeSession implements AgentSession {
         emit({ kind: "error", message: msg.result || `Claude ended: ${msg.subtype}` });
       }
       emit({ kind: "turn-end", sessionId: this.sessionId });
-      const done = this.resolveTurn;
-      this.resolveTurn = this.rejectTurn = null;
-      done?.();
+      this.settleTurn();
       // Context usage is a control round-trip — fetch after the turn resolves
       // so it never delays the UI; emit when (and if) it returns.
       void this.contextUsage().then((u) => {
@@ -179,7 +187,20 @@ class ClaudeSession implements AgentSession {
     }
   }
 
+  /** Resolve (or reject) the in-flight turn exactly once and clear its handles. */
+  private settleTurn(err?: unknown): void {
+    const resolve = this.resolveTurn;
+    const reject = this.rejectTurn;
+    this.resolveTurn = this.rejectTurn = null;
+    if (err !== undefined) reject?.(err);
+    else resolve?.();
+  }
+
   send(message: string, onEvent: (e: AgentEvent) => void): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("Session disposed."));
+    // Guard against overlapping turns: a second send() while one is in flight would
+    // orphan the first promise (its resolve/reject would be overwritten).
+    if (this.resolveTurn) return Promise.reject(new Error("A turn is already in flight."));
     this.onEvent = onEvent;
     return new Promise<void>((resolve, reject) => {
       this.resolveTurn = resolve;
@@ -192,6 +213,8 @@ class ClaudeSession implements AgentSession {
   }
 
   interrupt(): void {
+    // Unblock a pending permission first so the SDK can unwind and emit a result.
+    this.denyPending?.();
     try {
       void this.q.interrupt?.();
     } catch {
@@ -201,6 +224,7 @@ class ClaudeSession implements AgentSession {
 
   dispose(): void {
     this.disposed = true;
+    this.denyPending?.();
     try {
       this.wake?.();
     } catch {
@@ -211,6 +235,9 @@ class ClaudeSession implements AgentSession {
     } catch {
       /* ignore */
     }
+    // The pump loop breaks on `disposed` without emitting a result, so settle here
+    // to ensure any awaiting send() promise is released.
+    this.settleTurn(new Error("Session disposed."));
   }
 
   async contextUsage(): Promise<ContextUsage | null> {

@@ -74,6 +74,8 @@ interface Convo {
   session: AgentSession | null;
   sessionSig: string;
   streaming: boolean;
+  stopped: boolean; // set by stop() so the turn renders as "Stopped", not an error
+  pendingPerm: (() => void) | null; // cancels an open permission card on stop
   queue: string[];
   pendingEl: HTMLElement | null; // container for queued-message chips
 }
@@ -96,6 +98,8 @@ interface AssistantCtx {
   sources: Set<string>;
   touched: TouchedNote[];
   convo: Convo;
+  /** Per-turn debounce timer, so parallel conversations don't fight over a shared one. */
+  renderTimer: number | null;
 }
 
 /** Abort a turn if no event arrives for this long (avoids infinite loading). */
@@ -131,8 +135,6 @@ export class ChatView extends ItemView {
   private contextEl!: HTMLElement;
   private excludeActiveNote = false;
   private manualAttached: string[] = [];
-  private renderTimer: number | null = null;
-  private renderTarget: AssistantCtx | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: KortexPlugin) {
     super(leaf);
@@ -175,8 +177,8 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    // this.active is always within this.convos, so the loop covers it.
     for (const c of this.convos) this.dropSession(c);
-    if (this.active) this.dropSession(this.active);
   }
 
   /* --------------------------- session mgmt ------------------------- */
@@ -312,6 +314,8 @@ export class ChatView extends ItemView {
         session: null,
         sessionSig: "",
         streaming: false,
+        stopped: false,
+        pendingPerm: null,
         queue: [],
         pendingEl: null,
       };
@@ -377,6 +381,8 @@ export class ChatView extends ItemView {
       session: null,
       sessionSig: "",
       streaming: false,
+      stopped: false,
+      pendingPerm: null,
       queue: [],
       pendingEl: null,
     };
@@ -731,6 +737,8 @@ export class ChatView extends ItemView {
       pop.show();
       document.addEventListener("click", onDoc, true);
     };
+    // Ensure the document listener is dropped if the view unloads while open.
+    this.register(() => close());
   }
 
   private updateUsage(u: ContextUsage | null): void {
@@ -946,6 +954,7 @@ export class ChatView extends ItemView {
       sources: new Set(),
       touched: [],
       convo: c,
+      renderTimer: null,
     };
     this.scrollConvo(c);
     return ctx;
@@ -1000,26 +1009,23 @@ export class ChatView extends ItemView {
   }
 
   private scheduleRender(ctx: AssistantCtx): void {
-    this.renderTarget = ctx;
-    if (this.renderTimer !== null) return;
-    this.renderTimer = window.setTimeout(() => {
-      this.renderTimer = null;
-      if (this.renderTarget) {
-        this.renderText(this.renderTarget, true);
-        this.scrollConvo(this.renderTarget.convo);
-      }
+    if (ctx.renderTimer !== null) return;
+    ctx.renderTimer = window.setTimeout(() => {
+      ctx.renderTimer = null;
+      this.renderText(ctx, true);
+      this.scrollConvo(ctx.convo);
     }, 60);
   }
 
   private flushRender(ctx: AssistantCtx): void {
-    if (this.renderTimer !== null) {
-      window.clearTimeout(this.renderTimer);
-      this.renderTimer = null;
+    if (ctx.renderTimer !== null) {
+      window.clearTimeout(ctx.renderTimer);
+      ctx.renderTimer = null;
     }
     this.renderText(ctx, false);
   }
 
-  private attachActions(turnEl: HTMLElement, text: string, retryText?: string): void {
+  private attachActions(turnEl: HTMLElement, text: string, retryText?: string, convo?: Convo): void {
     const bar = turnEl.createDiv({ cls: "mva-actions" });
 
     const copy = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Copy" } });
@@ -1036,9 +1042,10 @@ export class ChatView extends ItemView {
     if (retryText) {
       const retry = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Retry" } });
       setIcon(retry, "refresh-cw");
+      const target = convo ?? this.active;
       retry.onclick = () => {
-        if (this.streaming) return;
-        void this.runTurn(this.active, retryText);
+        if (target.streaming) return;
+        void this.runTurn(target, retryText);
       };
     }
   }
@@ -1164,17 +1171,25 @@ export class ChatView extends ItemView {
     renderToolDetail(card.createDiv({ cls: "mva-perm-detail" }), tool, input, null);
 
     const actions = card.createDiv({ cls: "mva-perm-actions" });
-    const settle = (
+    let done = false;
+    const finishCard = (
+      verdict: string,
       d: { behavior: "allow"; remember?: boolean } | { behavior: "deny"; message?: string }
     ) => {
+      if (done) return;
+      done = true;
+      c.pendingPerm = null;
       card.addClass("is-resolved");
       actions.empty();
-      card.createDiv({
-        cls: "mva-perm-verdict",
-        text: d.behavior === "deny" ? "Denied" : d.remember ? "Always allowed" : "Allowed",
-      });
+      card.createDiv({ cls: "mva-perm-verdict", text: verdict });
       resolve(d);
     };
+    const settle = (
+      d: { behavior: "allow"; remember?: boolean } | { behavior: "deny"; message?: string }
+    ) => finishCard(d.behavior === "deny" ? "Denied" : d.remember ? "Always allowed" : "Allowed", d);
+    // If the user presses Stop while this card is open, cancel it (the provider
+    // side is already unblocked via interrupt → deny).
+    c.pendingPerm = () => finishCard("Cancelled", { behavior: "deny", message: "Stopped." });
     actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Allow once" }).onclick = () =>
       settle({ behavior: "allow" });
     actions.createEl("button", { cls: "mva-btn", text: "Always allow" }).onclick = () => {
@@ -1204,8 +1219,10 @@ export class ChatView extends ItemView {
 
   private stop(): void {
     const c = this.active;
+    c.stopped = true;
     c.queue = [];
     this.renderQueue(c);
+    c.pendingPerm?.(); // cancel any open permission card
     c.session?.interrupt();
   }
 
@@ -1254,6 +1271,7 @@ export class ChatView extends ItemView {
 
     this.addUserTurn(c, text);
     const ctx = this.addAssistantTurn(c, text);
+    c.stopped = false;
     this.setStreaming(c, true);
 
     const adapter = ADAPTERS[c.provider];
@@ -1314,7 +1332,16 @@ export class ChatView extends ItemView {
           this.dropThinking(ctx);
           ctx.curTextEl = null;
           ctx.curTextSeg = null;
-          this.renderError(ctx, e.message);
+          if (c.stopped) {
+            // User pressed Stop — the provider reports an execution error as it
+            // unwinds; render it as a clean stop, not a scary error.
+            ctx.el.addClass("mva-aborted");
+            if (!ctx.fullText && ctx.cards.size === 0) {
+              ctx.bodyEl.createSpan({ cls: "mva-faint", text: "Stopped." });
+            }
+          } else {
+            this.renderError(ctx, e.message);
+          }
           break;
       }
     };
@@ -1323,6 +1350,12 @@ export class ChatView extends ItemView {
       bump();
       const session = await this.ensureSession(c);
       await session.send(message, onEvent);
+      // Stop the watchdog before reading `timedOut` so a timer that fires in the
+      // gap between send() resolving and `finally` can't trip a false timeout.
+      if (watchdog !== null) {
+        window.clearTimeout(watchdog);
+        watchdog = null;
+      }
       this.flushRender(ctx);
       if (timedOut && !ctx.fullText && ctx.cards.size === 0) {
         this.renderError(ctx, `No response — timed out after ${IDLE_TIMEOUT / 1000}s.`);
@@ -1331,7 +1364,7 @@ export class ChatView extends ItemView {
       if (s.featureMiniGraph && ctx.touched.length) {
         renderMiniGraph(ctx.el.createDiv({ cls: "mva-graph-wrap" }), ctx.touched, (p) => this.openNote(p));
       }
-      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text);
+      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text, c);
     } catch (err) {
       this.flushRender(ctx);
       this.dropSession(c); // a failed turn likely poisoned the session
@@ -1345,9 +1378,24 @@ export class ChatView extends ItemView {
         const msg = describeError(err, adapter.displayName);
         if (!ctx.bodyEl.querySelector(".mva-inline-error, .mva-onboard")) this.renderError(ctx, msg);
         new Notice(msg);
+        // Don't replay queued messages into a broken session — they'd just re-fail.
+        if (c.queue.length) {
+          c.queue = [];
+          this.renderQueue(c);
+        }
       }
     } finally {
       if (watchdog !== null) window.clearTimeout(watchdog);
+      c.pendingPerm = null;
+      // Confirm a user-initiated stop when nothing substantive was rendered.
+      if (
+        c.stopped &&
+        !ctx.fullText.trim() &&
+        !ctx.el.querySelector(".mva-faint, .mva-inline-error, .mva-onboard")
+      ) {
+        ctx.el.addClass("mva-aborted");
+        ctx.bodyEl.createSpan({ cls: "mva-faint", text: "Stopped." });
+      }
       if (ctx.segments.length) c.messages.push({ role: "assistant", segments: ctx.segments });
       c.updatedAt = Date.now();
       this.setStreaming(c, false);

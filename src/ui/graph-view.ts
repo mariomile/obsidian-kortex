@@ -118,7 +118,9 @@ export function wikilinkify(md: string, paths: string[]): string {
   if (!paths.length) return md;
   const names = [...new Set(paths.map(basename))].filter((n) => n.length >= 4).sort((a, b) => b.length - a.length);
   if (!names.length) return md;
-  const parts = md.split(/(```[\s\S]*?```|`[^`]*`|\[\[[^\]]*\]\])/g);
+  // Protected (odd) segments: fenced code, inline code, existing [[wikilinks]],
+  // and markdown links/images [text](url) — never rewrite basenames inside these.
+  const parts = md.split(/(```[\s\S]*?```|`[^`]*`|\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\))/g);
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (let i = 0; i < parts.length; i++) {
     // even indices are normal text; odd indices are code/links (left untouched)

@@ -25,6 +25,7 @@ export class Autocomplete {
   private sel = 0;
   private open = false;
   private tokenStart = -1;
+  private tokenEnd = -1;
   private reqId = 0;
 
   constructor(
@@ -55,6 +56,7 @@ export class Autocomplete {
       return;
     }
     this.tokenStart = pos - (1 + query.length);
+    this.tokenEnd = pos; // token end at parse time — caret may move before selection
     const id = ++this.reqId;
     const items = await prov.getItems(query);
     if (id !== this.reqId) return; // a newer query superseded this one
@@ -110,9 +112,11 @@ export class Autocomplete {
   private choose(i: number): void {
     const it = this.items[i];
     if (!it) return;
-    const pos = this.ta.selectionStart;
     const v = this.ta.value;
-    this.ta.value = v.slice(0, this.tokenStart) + it.insert + v.slice(pos);
+    // Replace [tokenStart, tokenEnd) — the token as parsed, not the live caret,
+    // which may have moved via arrow keys while the popup was open.
+    const end = Math.max(this.tokenStart, Math.min(this.tokenEnd, v.length));
+    this.ta.value = v.slice(0, this.tokenStart) + it.insert + v.slice(end);
     const caret = this.tokenStart + it.insert.length;
     this.ta.setSelectionRange(caret, caret);
     this.close();

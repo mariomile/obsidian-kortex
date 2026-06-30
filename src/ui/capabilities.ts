@@ -1,5 +1,5 @@
 import { App } from "obsidian";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { readdir, readFile } from "fs/promises";
 import { homedir } from "os";
 import type { MVASettings } from "../settings";
 
@@ -18,10 +18,10 @@ const NATIVE_MEMORY = ["capture_decision", "log_session", "capture_learning"];
 
 /* ----------------------------- gathering ------------------------------ */
 
-function scanNames(dir: string): { folders: string[]; mds: string[] } {
+async function scanNames(dir: string): Promise<{ folders: string[]; mds: string[] }> {
   const out = { folders: [] as string[], mds: [] as string[] };
   try {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
       if (e.isDirectory()) out.folders.push(e.name);
       else if (e.name.endsWith(".md")) out.mds.push(e.name.replace(/\.md$/, ""));
     }
@@ -32,9 +32,9 @@ function scanNames(dir: string): { folders: string[]; mds: string[] } {
 }
 
 /** Read `name:` / `description:` from a markdown file's frontmatter. */
-function readAgentMeta(file: string): NamedItem | null {
+async function readAgentMeta(file: string): Promise<NamedItem | null> {
   try {
-    const raw = readFileSync(file, "utf8").slice(0, 1500);
+    const raw = (await readFile(file, "utf8")).slice(0, 1500);
     const m = raw.match(/^---\n([\s\S]*?)\n---/);
     const fm = m ? m[1] : raw;
     const name = fm.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
@@ -46,7 +46,7 @@ function readAgentMeta(file: string): NamedItem | null {
   }
 }
 
-function gatherFromScopes(sub: "skills" | "agents" | "commands"): NamedItem[] {
+async function gatherFromScopes(sub: "skills" | "agents" | "commands"): Promise<NamedItem[]> {
   const seen = new Set<string>();
   const items: NamedItem[] = [];
   const roots = [`${homedir()}/.claude/${sub}`]; // global
@@ -56,12 +56,11 @@ function gatherFromScopes(sub: "skills" | "agents" | "commands"): NamedItem[] {
     items.push({ name, desc });
   };
   for (const root of roots) {
-    if (!existsSync(root)) continue;
-    const { folders, mds } = scanNames(root);
+    const { folders, mds } = await scanNames(root);
     for (const f of folders) add(f);
     for (const md of mds) {
       if (sub === "agents") {
-        const meta = readAgentMeta(`${root}/${md}.md`);
+        const meta = await readAgentMeta(`${root}/${md}.md`);
         add(meta?.name ?? md, meta?.desc);
       } else add(md);
     }
@@ -103,21 +102,20 @@ function mergeByName(a: NamedItem[], b: NamedItem[]): NamedItem[] {
   return [...map.values()].sort((x, y) => x.name.localeCompare(y.name));
 }
 
-function gatherMcpServers(app: App): string[] {
+async function gatherMcpServers(app: App): Promise<string[]> {
   const names = new Set<string>();
-  const tryFile = (path: string) => {
+  const tryFile = async (path: string) => {
     try {
-      if (!existsSync(path)) return;
-      const json = JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: Record<string, unknown> };
+      const json = JSON.parse(await readFile(path, "utf8")) as { mcpServers?: Record<string, unknown> };
       for (const k of Object.keys(json.mcpServers ?? {})) names.add(k);
     } catch {
-      /* ignore */
+      /* missing / unreadable / not JSON — ignore */
     }
   };
-  tryFile(`${homedir()}/.claude.json`);
+  await tryFile(`${homedir()}/.claude.json`);
   // project .mcp.json lives at the vault root
   const base = (app.vault.adapter as unknown as { getBasePath?(): string }).getBasePath?.();
-  if (base) tryFile(`${base}/.mcp.json`);
+  if (base) await tryFile(`${base}/.mcp.json`);
   return [...names].sort();
 }
 
@@ -192,7 +190,7 @@ export async function renderCapabilitiesPanel(
   {
     const b = card("MCP servers");
     chip(b, "obsidian (in-process)", nativeOn);
-    const external = gatherMcpServers(app);
+    const external = await gatherMcpServers(app);
     if (external.length) {
       for (const n of external) chip(b, n, !s.fastStartup, s.fastStartup ? "disabled by Fast startup" : "active");
     } else if (!nativeOn) {
@@ -204,7 +202,7 @@ export async function renderCapabilitiesPanel(
   // Sub-agents
   {
     const b = card("Sub-agents", ".claude/agents");
-    const agents = mergeByName(await gatherFromVault(app, "agents"), gatherFromScopes("agents"));
+    const agents = mergeByName(await gatherFromVault(app, "agents"), await gatherFromScopes("agents"));
     if (!agents.length) empty(b, "None found.");
     for (const a of agents) chip(b, a.name, true, a.desc);
   }
@@ -212,7 +210,7 @@ export async function renderCapabilitiesPanel(
   // Skills
   {
     const b = card("Skills", ".claude/skills");
-    const skills = mergeByName(await gatherFromVault(app, "skills"), gatherFromScopes("skills"));
+    const skills = mergeByName(await gatherFromVault(app, "skills"), await gatherFromScopes("skills"));
     if (!skills.length) empty(b, "None found.");
     for (const sk of skills) chip(b, sk.name, true);
   }
@@ -220,7 +218,7 @@ export async function renderCapabilitiesPanel(
   // Commands
   {
     const b = card("Commands", ".claude/commands");
-    const cmds = mergeByName(await gatherFromVault(app, "commands"), gatherFromScopes("commands"));
+    const cmds = mergeByName(await gatherFromVault(app, "commands"), await gatherFromScopes("commands"));
     if (!cmds.length) empty(b, "None found.");
     for (const cm of cmds) chip(b, `/${cm.name}`, true);
   }

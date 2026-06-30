@@ -34,7 +34,22 @@ function slugify(s: string): string {
     .slice(0, 60) || "untitled";
 }
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Local date (not UTC) — toISOString() would roll to tomorrow late at night in +TZ.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Create any missing parent folders for a vault path (vault.create won't). */
+async function ensureParentFolder(app: App, path: string): Promise<void> {
+  const slash = path.lastIndexOf("/");
+  if (slash <= 0) return;
+  const dir = path.slice(0, slash);
+  if (app.vault.getAbstractFileByPath(dir)) return;
+  try {
+    await app.vault.createFolder(dir);
+  } catch {
+    /* already exists (race) — fine */
+  }
 }
 
 /**
@@ -218,6 +233,7 @@ export function createObsidianToolServer(app: App) {
     async (args) => {
       const path = args.path.endsWith(".md") ? args.path : `${args.path}.md`;
       if (app.vault.getAbstractFileByPath(path)) return err(`Already exists: ${path}`);
+      await ensureParentFolder(app, path);
       const file = await app.vault.create(path, args.content);
       const fm = args.frontmatter ?? {};
       await app.fileManager.processFrontMatter(file, (f: Record<string, unknown>) => {
@@ -294,6 +310,7 @@ export function createObsidianToolServer(app: App) {
     async (args) => {
       const path = `_system/memory/decisions/${today()}-${slugify(args.title)}.md`;
       if (app.vault.getAbstractFileByPath(path)) return err(`Already exists: ${path}`);
+      await ensureParentFolder(app, path);
       const body =
         `# Decision: ${args.title}\n\n` +
         `## Contesto\n${args.context}\n\n` +
@@ -325,6 +342,7 @@ export function createObsidianToolServer(app: App) {
         const cur = await app.vault.read(file);
         await app.vault.modify(file, entry + cur);
       } else {
+        await ensureParentFolder(app, path);
         await app.vault.create(path, entry);
       }
       return ok("Logged session entry.");
@@ -338,6 +356,7 @@ export function createObsidianToolServer(app: App) {
     async (args) => {
       const path = `_system/memory/learnings/${today()}-${slugify(args.title)}.md`;
       if (app.vault.getAbstractFileByPath(path)) return err(`Already exists: ${path}`);
+      await ensureParentFolder(app, path);
       const body =
         `# Learning: ${args.title}\n\n` +
         `## Osservazione\n${args.observation}\n\n` +
