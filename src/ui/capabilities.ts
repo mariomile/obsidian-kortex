@@ -1,4 +1,4 @@
-import { App, setIcon } from "obsidian";
+import { App } from "obsidian";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { homedir } from "os";
 import type { MVASettings } from "../settings";
