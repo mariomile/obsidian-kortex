@@ -337,5 +337,72 @@ export class MVASettingTab extends PluginSettingTab {
     toggle("Surface related notes", "Show notes related to the active note in the empty state.", "featureSurfacing");
     toggle("Wikilink-ify replies", "Turn mentions of existing note titles in replies into clickable [[wikilinks]].", "featureWikilinkify");
     toggle("Mini-graph", "Show a small graph of the notes the agent touched each turn.", "featureMiniGraph");
+
+    this.renderMcpSection(containerEl);
+  }
+
+  /** In-app management of the project's `.mcp.json` (loads when Fast startup is off). */
+  private async renderMcpSection(containerEl: HTMLElement): Promise<void> {
+    new Setting(containerEl).setName("MCP servers").setHeading();
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "Manage external MCP servers in the project's .mcp.json (vault root). These load into Claude when Fast startup is OFF.",
+    });
+
+    const adapter = this.plugin.app.vault.adapter;
+    const path = ".mcp.json";
+    let current = '{\n  "mcpServers": {}\n}';
+    try {
+      if (await adapter.exists(path)) current = await adapter.read(path);
+    } catch {
+      /* missing — use template */
+    }
+
+    const status = containerEl.createEl("div", { cls: "setting-item-description" });
+    const setStatus = (msg: string, ok: boolean) => {
+      status.setText(msg);
+      status.style.color = ok ? "var(--text-success, var(--text-muted))" : "var(--text-error)";
+    };
+
+    // Detected servers summary.
+    const summary = containerEl.createEl("div", { cls: "setting-item-description" });
+    const refreshSummary = (text: string) => {
+      try {
+        const names = Object.keys((JSON.parse(text)?.mcpServers ?? {}) as Record<string, unknown>);
+        summary.setText(names.length ? `Servers: ${names.join(", ")}` : "No servers configured.");
+      } catch {
+        summary.setText("");
+      }
+    };
+    refreshSummary(current);
+
+    const area = new Setting(containerEl).setName(".mcp.json").setDesc("Edit and save. Must be valid JSON.");
+    area.addTextArea((t) => {
+      t.setValue(current);
+      t.inputEl.rows = 10;
+      t.inputEl.style.width = "100%";
+      t.inputEl.style.fontFamily = "var(--font-monospace)";
+      t.onChange(() => refreshSummary(t.getValue()));
+      area.addButton((b) =>
+        b
+          .setButtonText("Save")
+          .setCta()
+          .onClick(async () => {
+            const raw = t.getValue();
+            try {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed !== "object" || parsed === null || typeof parsed.mcpServers !== "object") {
+                setStatus('Invalid: expected an object with an "mcpServers" key.', false);
+                return;
+              }
+              await adapter.write(path, JSON.stringify(parsed, null, 2));
+              refreshSummary(raw);
+              setStatus("Saved .mcp.json. Turn Fast startup off to load these servers.", true);
+            } catch (e) {
+              setStatus(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`, false);
+            }
+          })
+      );
+    });
   }
 }
