@@ -23,7 +23,6 @@ export interface MVASettings {
   memoryReadEnabled: boolean;
   memoryWriteEnabled: boolean;
   featureSurfacing: boolean;
-  featureNeighborhood: boolean;
   featureWikilinkify: boolean;
   featureMiniGraph: boolean;
 }
@@ -46,7 +45,6 @@ export const DEFAULT_SETTINGS: MVASettings = {
   memoryReadEnabled: true,
   memoryWriteEnabled: true,
   featureSurfacing: true,
-  featureNeighborhood: false,
   featureWikilinkify: false,
   featureMiniGraph: false,
 };
@@ -229,7 +227,6 @@ export class MVASettingTab extends PluginSettingTab {
       "memoryWriteEnabled"
     );
     toggle("Surface related notes", "Show notes related to the active note in the empty state.", "featureSurfacing");
-    toggle("Neighborhood panel", "Collapsible backlinks/outgoing/related panel for the active note.", "featureNeighborhood");
     toggle("Wikilink-ify replies", "Turn mentions of existing note titles in replies into clickable [[wikilinks]].", "featureWikilinkify");
     toggle("Mini-graph", "Show a small graph of the notes the agent touched each turn.", "featureMiniGraph");
   }

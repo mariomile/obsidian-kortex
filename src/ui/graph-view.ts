@@ -1,47 +1,6 @@
-import { App, TFile, setIcon } from "obsidian";
-import { neighborhood, basename } from "../obsidian/graph";
+import { basename } from "../obsidian/graph";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** Render a collapsible backlinks/outgoing/related panel for a note. */
-export function renderNeighborhoodPanel(
-  container: HTMLElement,
-  app: App,
-  file: TFile | null,
-  onOpen: (path: string) => void
-): void {
-  container.empty();
-  if (!file) {
-    container.toggleClass("is-hidden", true);
-    return;
-  }
-  container.toggleClass("is-hidden", false);
-  const n = neighborhood(app, file);
-  const total = n.backlinks.length + n.outgoing.length + n.related.length;
-
-  const head = container.createDiv({ cls: "mva-nb-head" });
-  setIcon(head.createSpan({ cls: "mva-nb-chevron" }), "chevron-right");
-  setIcon(head.createSpan({ cls: "mva-nb-icon" }), "network");
-  head.createSpan({ cls: "mva-nb-title", text: basename(file.path) });
-  head.createSpan({ cls: "mva-nb-count", text: String(total) });
-  head.onclick = () => container.toggleClass("is-collapsed", !container.hasClass("is-collapsed"));
-  container.toggleClass("is-collapsed", true);
-
-  const body = container.createDiv({ cls: "mva-nb-body" });
-  const section = (label: string, paths: string[]) => {
-    if (!paths.length) return;
-    const sec = body.createDiv({ cls: "mva-nb-section" });
-    sec.createDiv({ cls: "mva-nb-label", text: label });
-    for (const p of paths.slice(0, 12)) {
-      const chip = sec.createSpan({ cls: "mva-nb-chip", text: basename(p) });
-      chip.onclick = () => onOpen(p);
-    }
-  };
-  section("Related", n.related);
-  section("Backlinks", n.backlinks);
-  section("Links out", n.outgoing);
-  if (total === 0) body.createDiv({ cls: "mva-faint", text: "No connections yet." });
-}
 
 export interface TouchedNote {
   path: string;

@@ -25,7 +25,7 @@ import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/
 import { createObsidianToolServer, OBSIDIAN_READ_TOOLS, OBSIDIAN_MEMORY_TOOLS } from "./obsidian/tools";
 import { readBootContext } from "./obsidian/memory";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
-import { renderNeighborhoodPanel, renderMiniGraph, wikilinkify, type TouchedNote } from "./ui/graph-view";
+import { renderMiniGraph, wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { renderCapabilitiesPanel } from "./ui/capabilities";
 
 export const VIEW_TYPE = "kortex-view";
@@ -118,7 +118,6 @@ export class ChatView extends ItemView {
   }
   private obsidianServer: unknown = null;
   private memoryPreamble = "";
-  private neighborhoodEl: HTMLElement | null = null;
 
   private convos: Convo[] = [];
   private active!: Convo;
@@ -161,16 +160,13 @@ export class ChatView extends ItemView {
     root.empty();
     root.addClass("mva-root");
     this.buildHeader(root);
-    this.neighborhoodEl = root.createDiv({ cls: "mva-nb is-hidden" });
     this.listWrap = root.createDiv({ cls: "mva-list-wrap" });
     this.buildComposer(root);
     await this.restore();
     this.refreshContext();
-    this.refreshNeighborhood();
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.refreshContext();
-        this.refreshNeighborhood();
         this.refreshSurfacing();
       })
     );
@@ -866,18 +862,6 @@ export class ChatView extends ItemView {
 
   private clearEmptyState(c: Convo = this.active): void {
     c.listEl.querySelector(".mva-empty")?.remove();
-  }
-
-  private refreshNeighborhood(): void {
-    if (!this.neighborhoodEl) return;
-    if (!this.plugin.settings.featureNeighborhood) {
-      this.neighborhoodEl.empty();
-      this.neighborhoodEl.toggleClass("is-hidden", true);
-      return;
-    }
-    renderNeighborhoodPanel(this.neighborhoodEl, this.app, this.app.workspace.getActiveFile(), (p) =>
-      this.openNote(p)
-    );
   }
 
   /** Re-render the empty state (surfacing) when the active note changes. */
