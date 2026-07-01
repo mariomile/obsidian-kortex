@@ -27,6 +27,7 @@ export class Autocomplete {
   private tokenStart = -1;
   private tokenEnd = -1;
   private reqId = 0;
+  private fetchTimer: number | null = null;
 
   constructor(
     private ta: HTMLTextAreaElement,
@@ -40,7 +41,7 @@ export class Autocomplete {
     ta.addEventListener("blur", () => window.setTimeout(() => this.close(), 150));
   }
 
-  private async onInput(): Promise<void> {
+  private onInput(): void {
     const pos = this.ta.selectionStart;
     const before = this.ta.value.slice(0, pos);
     const m = before.match(/(^|\s)([/@$])([^\s]*)$/);
@@ -57,6 +58,16 @@ export class Autocomplete {
     }
     this.tokenStart = pos - (1 + query.length);
     this.tokenEnd = pos; // token end at parse time — caret may move before selection
+    // Debounce the fetch: getItems can scan the whole vault (e.g. the "@" provider),
+    // so don't run it on every keystroke — only after a short typing pause.
+    if (this.fetchTimer !== null) window.clearTimeout(this.fetchTimer);
+    this.fetchTimer = window.setTimeout(() => {
+      this.fetchTimer = null;
+      void this.fetch(prov, query);
+    }, 90);
+  }
+
+  private async fetch(prov: AcProvider, query: string): Promise<void> {
     const id = ++this.reqId;
     const items = await prov.getItems(query);
     if (id !== this.reqId) return; // a newer query superseded this one
@@ -128,6 +139,10 @@ export class Autocomplete {
   private close(): void {
     this.open = false;
     this.reqId++;
+    if (this.fetchTimer !== null) {
+      window.clearTimeout(this.fetchTimer);
+      this.fetchTimer = null;
+    }
     this.popup.hide();
   }
 }
