@@ -1276,33 +1276,60 @@
 }
 
 /* ------------------------------ sources ------------------------------- */
+/* Touched-notes footer — what the turn changed (emphasized) + what it read */
 .mva-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.mva-src-group {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
 }
-.mva-sources-label {
+.mva-src-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
 }
-.mva-source-chip {
+.mva-src-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11.5px;
   color: var(--text-muted);
   background: var(--background-modifier-hover);
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid transparent;
   border-radius: var(--mva-r1);
-  padding: 2px 7px;
+  padding: 2px 8px 2px 6px;
   cursor: pointer;
-  font-family: var(--font-monospace);
   transition: color var(--mva-t), border-color var(--mva-t);
 }
-.mva-source-chip:hover {
+.mva-src-chip .mva-src-ico {
+  display: inline-flex;
+  color: var(--text-faint);
+}
+.mva-src-chip .mva-src-ico .svg-icon {
+  width: 13px;
+  height: 13px;
+}
+.mva-src-chip:hover {
   color: var(--text-normal);
   border-color: var(--background-modifier-border-hover);
+}
+/* Edited/created notes — the actionable output, accented via theme */
+.mva-src-chip.is-write {
+  color: var(--text-normal);
+  border-color: color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+}
+.mva-src-chip.is-write .mva-src-ico {
+  color: var(--interactive-accent);
+}
+.mva-src-chip.is-write:hover {
+  border-color: var(--interactive-accent);
 }
 
 /* ----------------------------- onboarding ----------------------------- */
@@ -1360,27 +1387,6 @@
 }
 .mva-surface-chip {
   cursor: pointer;
-}
-
-/* ------------------------------ mini-graph ---------------------------- */
-.mva-graph-wrap {
-  margin-top: 8px;
-}
-.mva-graph {
-  max-width: 280px;
-}
-.mva-graph-edge {
-  stroke: var(--background-modifier-border-hover);
-  stroke-width: 1;
-}
-.mva-graph-label {
-  fill: var(--text-muted);
-  font-size: 8.5px;
-  font-family: var(--font-interface);
-}
-.mva-graph-node:hover circle {
-  stroke: var(--text-normal);
-  stroke-width: 1.5;
 }
 
 /* ------------------------------- queue -------------------------------- */

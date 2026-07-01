@@ -25,7 +25,7 @@ import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/
 import { createObsidianToolServer, OBSIDIAN_READ_TOOLS, OBSIDIAN_MEMORY_TOOLS } from "./obsidian/tools";
 import { readBootContext } from "./obsidian/memory";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
-import { renderMiniGraph, wikilinkify, type TouchedNote } from "./ui/graph-view";
+import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { renderCapabilitiesPanel } from "./ui/capabilities";
 
 export const VIEW_TYPE = "kortex-view";
@@ -361,9 +361,10 @@ export class ChatView extends ItemView {
 
   private refreshProviderUI(): void {
     const a = ADAPTERS[this.provider];
+    // Provider identity lives ONLY on the brand dot. All interactive accents
+    // follow the theme (--mva-brand defaults to --interactive-accent in CSS).
     this.brandDot.style.background = a.brandColor;
     this.brandDot.style.color = a.brandColor;
-    this.contentEl.style.setProperty("--mva-brand", a.brandColor);
     this.refreshProviderChip();
     this.refreshModelChip();
   }
@@ -1003,6 +1004,9 @@ export class ChatView extends ItemView {
     return out;
   }
 
+  /** Tool names that mutate a note — used to classify touched notes as read vs write. */
+  private static readonly WRITE_TOOLS = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links/;
+
   private static readonly EFFORT_OPTS: [string, string][] = [
     ["default", "Default"],
     ["low", "Low"],
@@ -1311,7 +1315,7 @@ export class ChatView extends ItemView {
         const el = c.listEl.createDiv({ cls: "mva-turn mva-assistant" });
         const body = el.createDiv({ cls: "mva-assistant-body" });
         let full = "";
-        const sources = new Set<string>();
+        const touched: TouchedNote[] = [];
         for (const s of m.segments) {
           if (s.t === "text") {
             void MarkdownRenderer.render(this.app, s.md, body.createDiv({ cls: "mva-bubble markdown-rendered" }), "", this);
@@ -1320,10 +1324,15 @@ export class ChatView extends ItemView {
             const refs = this.createToolCard(body, s.name, s.input);
             this.finishToolCard(refs, s.ok !== false, s.output);
             const fp = toolFilePath(s.name, s.input);
-            if (fp && s.name === "Read") sources.add(fp);
+            if (fp) {
+              const kind = ChatView.WRITE_TOOLS.test(s.name) ? "write" : "read";
+              const existing = touched.find((t) => t.path === fp);
+              if (!existing) touched.push({ path: fp, kind });
+              else if (kind === "write") existing.kind = "write";
+            }
           }
         }
-        this.attachSources(el, sources);
+        this.attachTouched(el, touched);
         if (full.trim()) this.attachActions(el, full, lastUser || undefined, c);
       }
     }
@@ -1633,15 +1642,27 @@ export class ChatView extends ItemView {
     new Notice(missingCheckpoints ? `${note} (some edits had no snapshot — reload clears checkpoints.)` : note);
   }
 
-  /** Render a clickable "Sources" footer from the notes the agent read. */
-  private attachSources(turnEl: HTMLElement, sources: Set<string>): void {
-    if (sources.size === 0) return;
+  /**
+   * Footer listing the notes a turn touched, split into what it *changed*
+   * (emphasized) and what it *read* (context). Click a chip to open the note.
+   */
+  private attachTouched(turnEl: HTMLElement, touched: TouchedNote[]): void {
+    if (touched.length === 0) return;
     const bar = turnEl.createDiv({ cls: "mva-sources" });
-    bar.createSpan({ cls: "mva-sources-label", text: "Sources" });
-    for (const path of sources) {
-      const chip = bar.createSpan({ cls: "mva-source-chip", text: path.split("/").pop() ?? path });
-      chip.onclick = () => this.openNote(path);
-    }
+    const group = (label: string, kind: "read" | "write", icon: string) => {
+      const items = touched.filter((t) => t.kind === kind);
+      if (!items.length) return;
+      const g = bar.createDiv({ cls: "mva-src-group" });
+      g.createSpan({ cls: "mva-src-label", text: label });
+      for (const t of items) {
+        const chip = g.createSpan({ cls: `mva-src-chip is-${kind}` });
+        setIcon(chip.createSpan({ cls: "mva-src-ico" }), icon);
+        chip.createSpan({ text: noteBasename(t.path) });
+        chip.onclick = () => this.openNote(t.path);
+      }
+    };
+    group("Edited", "write", "file-pen"); // changes first — the actionable output
+    group("Read", "read", "file-text");
   }
 
   private flashIcon(btn: HTMLElement, on: string, off: string): void {
@@ -1910,11 +1931,12 @@ export class ChatView extends ItemView {
           this.addToolCard(ctx, e.id, e.name, e.input);
           const fp = toolFilePath(e.name, e.input);
           if (fp) {
-            const writeTools = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links/;
-            const kind = writeTools.test(e.name) ? "write" : "read";
+            const kind = ChatView.WRITE_TOOLS.test(e.name) ? "write" : "read";
             if (kind === "read") ctx.sources.add(fp);
             else void this.snapshot(checkpoint, fp); // checkpoint before the write runs
-            if (!ctx.touched.some((t) => t.path === fp)) ctx.touched.push({ path: fp, kind });
+            const existing = ctx.touched.find((t) => t.path === fp);
+            if (!existing) ctx.touched.push({ path: fp, kind });
+            else if (kind === "write") existing.kind = "write"; // read-then-written → show as written
           }
           break;
         }
@@ -1987,10 +2009,7 @@ export class ChatView extends ItemView {
       if (timedOut && !ctx.fullText && ctx.cards.size === 0) {
         this.renderError(ctx, `No response — timed out after ${IDLE_TIMEOUT / 1000}s.`);
       }
-      this.attachSources(ctx.el, ctx.sources);
-      if (s.featureMiniGraph && ctx.touched.length) {
-        renderMiniGraph(ctx.el.createDiv({ cls: "mva-graph-wrap" }), ctx.touched, (p) => this.openNote(p));
-      }
+      this.attachTouched(ctx.el, ctx.touched);
       if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text, c);
     } catch (err) {
       this.flushRender(ctx);

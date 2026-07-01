@@ -34,7 +34,6 @@ export interface MVASettings {
   memoryWriteEnabled: boolean;
   featureSurfacing: boolean;
   featureWikilinkify: boolean;
-  featureMiniGraph: boolean;
   // Tab bar runtime state (not user-facing settings).
   openTabIds: string[];
   activeTabId: string;
@@ -65,7 +64,6 @@ export const DEFAULT_SETTINGS: MVASettings = {
   memoryWriteEnabled: true,
   featureSurfacing: true,
   featureWikilinkify: false,
-  featureMiniGraph: false,
   openTabIds: [],
   activeTabId: "",
 };
@@ -336,7 +334,6 @@ export class MVASettingTab extends PluginSettingTab {
     );
     toggle("Surface related notes", "Show notes related to the active note in the empty state.", "featureSurfacing");
     toggle("Wikilink-ify replies", "Turn mentions of existing note titles in replies into clickable [[wikilinks]].", "featureWikilinkify");
-    toggle("Mini-graph", "Show a small graph of the notes the agent touched each turn.", "featureMiniGraph");
 
     this.renderMcpSection(containerEl);
   }
