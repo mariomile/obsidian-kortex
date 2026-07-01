@@ -939,10 +939,11 @@ export class ChatView extends ItemView {
 
   /* --------------------------- autocomplete ------------------------- */
 
-  private slashCache: { commands: string[]; skills: string[]; agents: string[] } | null = null;
+  private slashCache: { commands: string[]; skills: string[]; agents: string[]; ts: number } | null = null;
+  private static readonly SLASH_TTL = 30_000;
 
   private async loadSlash(): Promise<{ commands: string[]; skills: string[]; agents: string[] }> {
-    if (this.slashCache) return this.slashCache;
+    if (this.slashCache && Date.now() - this.slashCache.ts < ChatView.SLASH_TTL) return this.slashCache;
     const commands: string[] = [];
     const skills: string[] = [];
     const agents: string[] = [];
@@ -966,7 +967,7 @@ export class ChatView extends ItemView {
     } catch {
       /* no agents dir */
     }
-    this.slashCache = { commands, skills, agents };
+    this.slashCache = { commands, skills, agents, ts: Date.now() };
     return this.slashCache;
   }
 
