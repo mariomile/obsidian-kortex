@@ -1610,11 +1610,16 @@ export class ChatView extends ItemView {
 
   private scheduleRender(ctx: AssistantCtx): void {
     if (ctx.renderTimer !== null) return;
+    // Each streamed render re-parses the whole accumulated markdown, so the cost
+    // grows with length. Stretch the debounce as the reply grows to keep long
+    // replies smooth (the turn-end flushRender always does the final full render).
+    const len = ctx.curRaw.length;
+    const delay = len > 8000 ? 400 : len > 3000 ? 200 : len > 1000 ? 120 : 60;
     ctx.renderTimer = window.setTimeout(() => {
       ctx.renderTimer = null;
       this.renderText(ctx, true);
       this.scrollConvo(ctx.convo);
-    }, 60);
+    }, delay);
   }
 
   private flushRender(ctx: AssistantCtx): void {
