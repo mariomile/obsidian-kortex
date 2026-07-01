@@ -1924,6 +1924,22 @@ export class ChatView extends ItemView {
 
   /* -------------------------- permissions --------------------------- */
 
+  /** Signature for the "Always allow" list — argument-aware so allowing one
+   *  Bash command (or one file edit) does NOT blanket-approve all of them.
+   *  Bash → keyed by the leading command token (the binary); file-mutating
+   *  tools → keyed by target path; everything else → the bare tool name. */
+  private allowKey(tool: string, input: unknown): string {
+    const i = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    if (tool === "Bash") {
+      const cmd = typeof i.command === "string" ? i.command : "";
+      const first = cmd.trim().split(/\s+/)[0] ?? "";
+      return first ? `Bash:${first}` : "Bash";
+    }
+    const fp = toolFilePath(tool, input);
+    if (fp && ChatView.WRITE_TOOLS.test(tool)) return `${tool}:${fp}`;
+    return tool;
+  }
+
   private addPermissionCard(
     ctx: AssistantCtx,
     c: Convo,
@@ -1964,8 +1980,17 @@ export class ChatView extends ItemView {
     c.pendingPerm = () => finishCard("Cancelled", { behavior: "deny", message: "Stopped." });
     actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Allow once" }).onclick = () =>
       settle({ behavior: "allow" });
-    actions.createEl("button", { cls: "mva-btn", text: "Always allow" }).onclick = () => {
-      c.allow.add(tool);
+    const alwaysBtn = actions.createEl("button", { cls: "mva-btn", text: "Always allow" });
+    const scope =
+      tool === "Bash"
+        ? `all \`${(((input as Record<string, unknown>)?.command as string) || "").trim().split(/\s+/)[0] || "shell"}\` commands`
+        : ChatView.WRITE_TOOLS.test(tool) && toolFilePath(tool, input)
+          ? `edits to this file`
+          : `this tool`;
+    alwaysBtn.setAttr("aria-label", `Always allow ${scope} in this conversation`);
+    alwaysBtn.setAttr("title", `Always allow ${scope} in this conversation`);
+    alwaysBtn.onclick = () => {
+      c.allow.add(this.allowKey(tool, input));
       settle({ behavior: "allow", remember: true });
     };
     actions.createEl("button", { cls: "mva-btn mva-btn-danger", text: "Deny" }).onclick = () =>
@@ -2124,7 +2149,7 @@ export class ChatView extends ItemView {
             if (isWrite && fp) void this.snapshot(checkpoint, fp).finally(() => e.resolve(d));
             else e.resolve(d);
           };
-          if ((s.autoAllowRead && isRead) || c.allow.has(e.tool)) {
+          if ((s.autoAllowRead && isRead) || c.allow.has(this.allowKey(e.tool, e.input))) {
             allow({ behavior: "allow" });
           } else if (OBSIDIAN_MEMORY_TOOLS.has(e.tool) && !s.memoryWriteEnabled) {
             e.resolve({ behavior: "deny", message: "Memory writing is disabled in Exo settings." });
