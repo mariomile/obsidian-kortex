@@ -189,13 +189,19 @@ export class ChatView extends ItemView {
     this.buildHeader(root);
     this.tabsEl = root.createDiv({ cls: "mva-tabs" });
     this.listWrap = root.createDiv({ cls: "mva-list-wrap" });
-    // Wire up internal-link clicks in rendered markdown (MarkdownRenderer doesn't do this for custom views).
+    // Wire up link clicks in rendered markdown (MarkdownRenderer doesn't do this for custom views).
     this.registerDomEvent(this.listWrap, "click", (e) => {
-      const a = (e.target as HTMLElement).closest("a.internal-link") as HTMLElement | null;
+      const a = (e.target as HTMLElement).closest("a") as HTMLAnchorElement | null;
       if (!a) return;
-      e.preventDefault();
-      const href = a.getAttr("data-href") || a.getAttr("href") || a.textContent || "";
-      if (href) void this.app.workspace.openLinkText(href, "", Keymap.isModEvent(e));
+      const external = a.getAttr("href") ?? "";
+      if (a.classList.contains("internal-link")) {
+        e.preventDefault();
+        const href = a.getAttr("data-href") || a.getAttr("href") || a.textContent || "";
+        if (href) void this.app.workspace.openLinkText(href, "", Keymap.isModEvent(e));
+      } else if (/^https?:\/\//.test(external)) {
+        e.preventDefault();
+        window.open(external, "_blank");
+      }
     });
     this.buildComposer(root);
     await this.restore();
@@ -308,7 +314,11 @@ export class ChatView extends ItemView {
   }
 
   private onProviderChange(next: ProviderId): void {
-    if (this.streaming || next === this.provider) return;
+    if (next === this.provider) return;
+    if (this.streaming) {
+      new Notice("Can't switch provider while a reply is streaming.");
+      return;
+    }
     this.provider = next;
     this.model = next === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel;
     this.active.provider = next;
@@ -991,11 +1001,21 @@ export class ChatView extends ItemView {
   }
 
   private static readonly EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"];
+  private static readonly EFFORT_LABELS: Record<string, string> = {
+    default: "Default",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra high",
+    max: "Max",
+  };
+  private static effortLabel(e: string): string {
+    return ChatView.EFFORT_LABELS[e] ?? e;
+  }
 
   private buildToolbar(bar: HTMLElement): void {
     const tb = bar.createDiv({ cls: "mva-toolbar" });
     const s = this.plugin.settings;
-    const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
 
     // Provider — Permission-style popover.
     this.refreshProviderChip = this.buildSelectChip(tb, {
@@ -1014,6 +1034,10 @@ export class ChatView extends ItemView {
       getOptions: () => this.modelChoices().map((m) => ({ value: m.id, label: m.label })),
       getCurrent: () => this.model,
       onSelect: (v) => {
+        if (this.streaming) {
+          new Notice("Can't switch model while a reply is streaming.");
+          return;
+        }
         this.model = v;
         this.persistModel();
       },
@@ -1022,8 +1046,8 @@ export class ChatView extends ItemView {
     // Effort — Permission-style popover.
     this.buildSelectChip(tb, {
       ariaLabel: "Effort",
-      getLabel: () => `Effort: ${cap(s.effort || "default")}`,
-      getOptions: () => ChatView.EFFORTS.map((e) => ({ value: e, label: cap(e) })),
+      getLabel: () => `Effort: ${ChatView.effortLabel(s.effort || "default")}`,
+      getOptions: () => ChatView.EFFORTS.map((e) => ({ value: e, label: ChatView.effortLabel(e) })),
       getCurrent: () => s.effort || "default",
       onSelect: (v) => {
         s.effort = v;
