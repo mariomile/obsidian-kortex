@@ -28,7 +28,7 @@ import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
 import { NoteDiffModal } from "./ui/note-diff";
 import { renderCapabilitiesPanel } from "./ui/capabilities";
-import { PromptVarsModal, extractVars } from "./ui/prompt-vars";
+import { PromptVarsModal, extractVars, fillVars } from "./ui/prompt-vars";
 
 export const VIEW_TYPE = "exo-view";
 /** Custom Obsidian icon id for the Exo brand mark (registered in main.ts). */
@@ -1048,10 +1048,11 @@ export class ChatView extends ItemView {
     const out: AcItem[] = [];
     for (const p of this.plugin.settings.customPrompts) {
       if (p.name.toLowerCase().includes(q)) {
+        const isWorkflow = p.prompt.includes(" >>> ");
         out.push({
           label: p.name,
-          detail: "prompt",
-          icon: "message-square",
+          detail: isWorkflow ? "workflow" : "prompt",
+          icon: isWorkflow ? "list-ordered" : "message-square",
           insert: "",
           onSelect: () => this.usePrompt(p.prompt),
         });
@@ -1418,14 +1419,40 @@ export class ChatView extends ItemView {
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }
 
-  /** Use a custom prompt: if it has {{vars}}, collect them first, then insert. */
+  /** Use a custom prompt. A single prompt is inserted into the composer; a
+   *  workflow (steps separated by " >>> ") is queued and run in sequence.
+   *  {{variables}} across all steps are collected once, then applied to each. */
   private usePrompt(promptText: string): void {
+    const steps = promptText.split(/\s+>>>\s+/).map((s) => s.trim()).filter(Boolean);
     const vars = extractVars(promptText);
+    const run = (values: Record<string, string>) => {
+      if (steps.length > 1) {
+        this.runWorkflow(this.active, steps.map((s) => fillVars(s, values)));
+      } else {
+        this.insertAtComposer(fillVars(promptText, values));
+      }
+    };
     if (vars.length === 0) {
-      this.insertAtComposer(promptText);
+      run({});
       return;
     }
-    new PromptVarsModal(this.app, promptText, vars, (filled) => this.insertAtComposer(filled)).open();
+    new PromptVarsModal(this.app, vars, run).open();
+  }
+
+  /** Run a multi-step workflow by enqueuing its steps; the turn-drain loop runs
+   *  them in order. Stop (which clears the queue) aborts the remaining steps. */
+  private runWorkflow(c: Convo, steps: string[]): void {
+    if (steps.length === 0) return;
+    const [first, ...rest] = steps;
+    for (const s of rest) c.queue.push({ text: s });
+    if (c.streaming) {
+      // Busy: queue the first step too; it runs when the current turn drains.
+      c.queue.unshift({ text: first });
+      this.renderQueue(c);
+    } else {
+      this.renderQueue(c);
+      void this.runTurn(c, first);
+    }
   }
 
   /** Insert text at the composer's caret (replacing any selection), then focus. */

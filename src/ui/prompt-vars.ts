@@ -27,9 +27,8 @@ export class PromptVarsModal extends Modal {
   private values: Record<string, string> = {};
   constructor(
     app: App,
-    private promptText: string,
     private vars: string[],
-    private onSubmit: (filled: string) => void
+    private onSubmit: (values: Record<string, string>) => void
   ) {
     super(app);
   }
@@ -49,7 +48,7 @@ export class PromptVarsModal extends Modal {
     inputs[0]?.focus();
     const actions = contentEl.createDiv({ cls: "mva-pv-actions" });
     const submit = () => {
-      this.onSubmit(fillVars(this.promptText, this.values));
+      this.onSubmit(this.values);
       this.close();
     };
     actions.createEl("button", { cls: "mva-btn mva-btn-primary", text: "Insert" }).onclick = submit;
