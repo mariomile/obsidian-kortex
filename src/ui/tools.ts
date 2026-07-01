@@ -21,6 +21,8 @@ const OBSIDIAN_NOTE_TOOLS = new Set([
   "mcp__obsidian__add_links",
   "mcp__obsidian__open_note",
   "mcp__obsidian__create_note",
+  "mcp__obsidian__edit_note",
+  "mcp__obsidian__rename_note",
 ]);
 
 /** The raw file path a tool operates on, if any (for click-to-open). */
@@ -46,6 +48,9 @@ const OBSIDIAN_META: Record<string, { icon: string; label: string; targetKey?: s
   update_frontmatter: { icon: "settings-2", label: "Frontmatter", targetKey: "target" },
   add_links: { icon: "link", label: "Add links", targetKey: "target" },
   open_note: { icon: "external-link", label: "Open note", targetKey: "target" },
+  edit_note: { icon: "file-pen-line", label: "Edit note", targetKey: "target" },
+  insert_at_cursor: { icon: "text-cursor-input", label: "Insert at cursor" },
+  rename_note: { icon: "file-symlink", label: "Rename note", targetKey: "target" },
   capture_decision: { icon: "gavel", label: "Capture decision", targetKey: "title" },
   log_session: { icon: "history", label: "Log session", targetKey: "title" },
   capture_learning: { icon: "lightbulb", label: "Capture learning", targetKey: "title" },

@@ -13,7 +13,7 @@ const BUILTIN_TOOLS = [
 ];
 const FILE_BUILTINS = new Set(["Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "LS", "NotebookEdit"]);
 const NATIVE_READ = ["search_vault", "read_note", "get_backlinks", "get_neighborhood", "list_notes", "list_tags", "get_active_context"];
-const NATIVE_WRITE = ["create_note", "append_to_note", "update_frontmatter", "add_links", "open_note"];
+const NATIVE_WRITE = ["create_note", "append_to_note", "update_frontmatter", "add_links", "open_note", "edit_note", "insert_at_cursor", "rename_note"];
 const NATIVE_MEMORY = ["capture_decision", "log_session", "capture_learning"];
 
 /* ----------------------------- gathering ------------------------------ */

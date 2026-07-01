@@ -1039,7 +1039,7 @@ export class ChatView extends ItemView {
   }
 
   /** Tool names that mutate a note — used to classify touched notes as read vs write. */
-  private static readonly WRITE_TOOLS = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links/;
+  private static readonly WRITE_TOOLS = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links|edit_note|insert_at_cursor|rename_note/;
 
   private static readonly EFFORT_OPTS: [string, string][] = [
     ["default", "Default"],
@@ -2230,7 +2230,7 @@ export class ChatView extends ItemView {
           const isRead = READ_ONLY_TOOLS.has(e.tool) || OBSIDIAN_READ_TOOLS.has(e.tool);
           const fp = toolFilePath(e.tool, e.input);
           const isWrite =
-            !!fp && /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links|NotebookEdit/.test(e.tool);
+            !!fp && /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links|NotebookEdit|edit_note|rename_note/.test(e.tool);
           // Snapshot the target file (pre-edit) before letting a write proceed.
           const allow = (d: { behavior: "allow"; remember?: boolean }) => {
             if (isWrite && fp) void this.snapshot(checkpoint, fp).finally(() => e.resolve(d));

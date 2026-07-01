@@ -302,6 +302,54 @@ export function createObsidianToolServer(app: App, alwaysLoad = true, memoryWrit
     }
   );
 
+  const editNote = tool(
+    "edit_note",
+    "Replace text in an existing note (Obsidian-native, link/frontmatter-safe). Fails if old_string is absent, or ambiguous unless replace_all is set. Prefer this over the built-in Edit for vault notes.",
+    { target: z.string(), old_string: z.string(), new_string: z.string(), replace_all: z.boolean().optional() },
+    async (args) => {
+      const file = need(args.target);
+      const content = await app.vault.read(file);
+      const count = args.old_string ? content.split(args.old_string).length - 1 : 0;
+      if (count === 0) return err(`Text not found in ${file.path}.`);
+      if (count > 1 && !args.replace_all) return err(`old_string appears ${count}× — pass replace_all or make it unique.`);
+      let next: string;
+      if (args.replace_all) {
+        next = content.split(args.old_string).join(args.new_string);
+      } else {
+        const i = content.indexOf(args.old_string);
+        next = content.slice(0, i) + args.new_string + content.slice(i + args.old_string.length);
+      }
+      await app.vault.modify(file, next);
+      return ok(`Edited [[${file.path}]]`);
+    }
+  );
+
+  const insertAtCursor = tool(
+    "insert_at_cursor",
+    "Insert text at the user's cursor in the active note (replaces the current selection if any). Use to write directly where the user is working.",
+    { text: z.string() },
+    async (args) => {
+      const editor = app.workspace.activeEditor?.editor;
+      if (!editor) return err("No active editor to insert into.");
+      editor.replaceSelection(args.text);
+      return ok("Inserted at cursor.");
+    }
+  );
+
+  const renameNote = tool(
+    "rename_note",
+    "Rename or move a note, updating all backlinks across the vault (Obsidian-native). Fails if the destination already exists.",
+    { target: z.string(), new_path: z.string() },
+    async (args) => {
+      const file = need(args.target);
+      const dest = args.new_path.endsWith(".md") ? args.new_path : `${args.new_path}.md`;
+      if (app.vault.getAbstractFileByPath(dest)) return err(`Already exists: ${dest}`);
+      await ensureParentFolder(app, dest);
+      await app.fileManager.renameFile(file, dest);
+      return ok(`Renamed to [[${dest}]]`);
+    }
+  );
+
   /* --------------------------- memory ----------------------------- */
 
   const captureDecision = tool(
@@ -391,6 +439,7 @@ export function createObsidianToolServer(app: App, alwaysLoad = true, memoryWrit
     tools: [
       searchVault, readNote, getBacklinks, getNeighborhood, listNotes, listTags, getActiveContext,
       createNote, appendToNote, updateFrontmatter, addLinks, openNote,
+      editNote, insertAtCursor, renameNote,
       ...(memoryWrite ? [captureDecision, logSession, captureLearning] : []),
     ],
   });
