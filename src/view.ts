@@ -1509,7 +1509,7 @@ export class ChatView extends ItemView {
     }
 
     const fork = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Fork into new tab" } });
-    setIcon(fork, "git-fork");
+    setIcon(fork, "git-compare-arrows");
     fork.onclick = () => this.forkConversation(convo ?? this.active);
 
     const rewind = bar.createEl("button", { cls: "mva-act", attr: { "aria-label": "Rewind here (conversation only)" } });
