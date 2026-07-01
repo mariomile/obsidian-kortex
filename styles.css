@@ -14,6 +14,14 @@
   padding: 0;
   background: transparent; /* inherit the native leaf background, like Claudian */
 }
+/* .mva-root IS the .view-content element (we add the class to contentEl), so
+   Obsidian's default `.workspace-leaf-content .view-content` padding-bottom
+   (max(safe-area, 32px)) wins over our `padding: 0` on specificity — leaving
+   dead space below the composer. Kill just the bottom; the composer owns its
+   own bottom spacing. Desktop-only plugin, so no safe-area inset needed. */
+.workspace-leaf-content .view-content.mva-root {
+  padding-bottom: 0;
+}
 
 /* ------------------------------- header ------------------------------- */
 .mva-header {
