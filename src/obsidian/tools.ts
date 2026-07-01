@@ -9,6 +9,7 @@ const err = (text: string): Result => ({ content: [{ type: "text", text }], isEr
 
 const MAX_CONTENT = 8000;
 const SKIP_LARGER_THAN = 200_000;
+const MAX_SCAN_FILES = 2000; // cap the built-in fallback scan (Omnisearch has no such limit)
 
 /** Omnisearch public API (when the plugin is installed). */
 interface OmnisearchResult {
@@ -93,13 +94,17 @@ export function createObsidianToolServer(app: App, alwaysLoad = true) {
 
       const search = prepareSimpleSearch(args.query);
       const hits: { path: string; score: number; snippet: string }[] = [];
-      for (const file of app.vault.getMarkdownFiles()) {
-        if (file.stat.size > SKIP_LARGER_THAN) continue;
+      const files = app.vault
+        .getMarkdownFiles()
+        .filter((f) => f.stat.size <= SKIP_LARGER_THAN)
+        .sort((a, b) => b.stat.mtime - a.stat.mtime);
+      const scanned = files.slice(0, MAX_SCAN_FILES);
+      for (const file of scanned) {
         let text = file.basename;
         try {
           text += "\n" + (await app.vault.cachedRead(file));
         } catch {
-          /* skip unreadable */
+          continue; // skip unreadable
         }
         const r = search(text);
         if (r) {
@@ -111,7 +116,11 @@ export function createObsidianToolServer(app: App, alwaysLoad = true) {
       hits.sort((a, b) => b.score - a.score);
       const top = hits.slice(0, limit);
       if (top.length === 0) return ok(`No matches for "${args.query}".`);
-      return ok(top.map((h) => `- [[${h.path}]] — ${h.snippet}`).join("\n"));
+      const body = top.map((h) => `- [[${h.path}]] — ${h.snippet}`).join("\n");
+      const capped = files.length > MAX_SCAN_FILES
+        ? `\n\n(Searched the ${MAX_SCAN_FILES} most recently edited notes of ${files.length}. Install Omnisearch for full-vault search.)`
+        : "";
+      return ok(body + capped);
     }
   );
 
