@@ -167,11 +167,13 @@ export default class ExoPlugin extends Plugin {
     return [];
   }
 
-  async saveConversations(data: unknown[]): Promise<void> {
+  /** Returns false (never throws) if the write failed, so callers can surface it. */
+  async saveConversations(data: unknown[]): Promise<boolean> {
     try {
       await this.app.vault.adapter.write(this.convoFile(), JSON.stringify(data));
+      return true;
     } catch {
-      /* non-fatal */
+      return false;
     }
   }
 }

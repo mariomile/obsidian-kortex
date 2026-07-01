@@ -166,6 +166,7 @@ export class ChatView extends ItemView {
   private contextEl!: HTMLElement;
   private excludeActiveNote = false;
   private manualAttached: string[] = [];
+  private lastPersistErrorNotice = 0;
   private pendingImages: ImageAttachment[] = [];
   private imagesEl!: HTMLElement;
 
@@ -469,7 +470,15 @@ export class ChatView extends ItemView {
   }
 
   private persist(): void {
-    void this.plugin.saveConversations(this.serialize());
+    void this.plugin.saveConversations(this.serialize()).then((ok) => {
+      if (ok) return;
+      // Throttle so a persistent disk problem doesn't spam a Notice every turn.
+      const now = Date.now();
+      if (now - this.lastPersistErrorNotice > 30_000) {
+        this.lastPersistErrorNotice = now;
+        new Notice("Exo couldn't save conversation history — check disk space and vault permissions.");
+      }
+    });
   }
 
   /* ------------------------- conversations -------------------------- */
