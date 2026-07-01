@@ -1331,6 +1331,66 @@
 .mva-src-chip.is-write:hover {
   border-color: var(--interactive-accent);
 }
+/* ×N edit-count badge */
+.mva-src-count {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--interactive-accent);
+  opacity: 0.85;
+}
+/* hover actions (diff / revert) — revealed on chip hover */
+.mva-src-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 1px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-3px);
+  /* animate only compositor-friendly props; max-width toggles instantly (no thrash) */
+  transition: opacity var(--mva-t), transform var(--mva-t);
+}
+.mva-src-chip:hover .mva-src-acts,
+.mva-src-chip:focus-within .mva-src-acts {
+  max-width: 44px;
+  opacity: 1;
+  transform: none;
+}
+.mva-src-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  border-radius: 3px;
+  padding: 1px;
+  cursor: pointer;
+  transition: color var(--mva-t), background var(--mva-t);
+}
+.mva-src-act:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.mva-src-act .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+.mva-src-act.is-armed {
+  color: var(--color-red, #e05b5b);
+  background: color-mix(in srgb, var(--color-red, #e05b5b) 15%, transparent);
+}
+.mva-src-chip.is-reverted {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.mva-src-chip.is-reverted .mva-src-acts {
+  display: none;
+}
+.mva-src-diff-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
 
 /* ----------------------------- onboarding ----------------------------- */
 .mva-onboard {

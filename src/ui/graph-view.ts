@@ -3,6 +3,8 @@ import { basename } from "../obsidian/graph";
 export interface TouchedNote {
   path: string;
   kind: "read" | "write";
+  /** Number of write ops on this note within the turn (for a ×N badge). */
+  count?: number;
 }
 
 /**

@@ -63,7 +63,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   memoryReadEnabled: true,
   memoryWriteEnabled: true,
   featureSurfacing: true,
-  featureWikilinkify: false,
+  featureWikilinkify: true,
   openTabIds: [],
   activeTabId: "",
 };

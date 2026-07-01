@@ -26,6 +26,7 @@ import { createObsidianToolServer, OBSIDIAN_READ_TOOLS, OBSIDIAN_MEMORY_TOOLS } 
 import { readBootContext } from "./obsidian/memory";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
 import { wikilinkify, type TouchedNote } from "./ui/graph-view";
+import { NoteDiffModal } from "./ui/note-diff";
 import { renderCapabilitiesPanel } from "./ui/capabilities";
 
 export const VIEW_TYPE = "kortex-view";
@@ -1327,8 +1328,11 @@ export class ChatView extends ItemView {
             if (fp) {
               const kind = ChatView.WRITE_TOOLS.test(s.name) ? "write" : "read";
               const existing = touched.find((t) => t.path === fp);
-              if (!existing) touched.push({ path: fp, kind });
-              else if (kind === "write") existing.kind = "write";
+              if (!existing) touched.push({ path: fp, kind, ...(kind === "write" ? { count: 1 } : {}) });
+              else if (kind === "write") {
+                existing.kind = "write";
+                existing.count = (existing.count ?? 0) + 1;
+              }
             }
           }
         }
@@ -1644,9 +1648,10 @@ export class ChatView extends ItemView {
 
   /**
    * Footer listing the notes a turn touched, split into what it *changed*
-   * (emphasized) and what it *read* (context). Click a chip to open the note.
+   * (emphasized, with ×N edit count + diff/revert actions) and what it *read*
+   * (context). `checkpoint` (live turns only) enables per-note diff/revert.
    */
-  private attachTouched(turnEl: HTMLElement, touched: TouchedNote[]): void {
+  private attachTouched(turnEl: HTMLElement, touched: TouchedNote[], checkpoint?: Checkpoint): void {
     if (touched.length === 0) return;
     const bar = turnEl.createDiv({ cls: "mva-sources" });
     const group = (label: string, kind: "read" | "write", icon: string) => {
@@ -1657,12 +1662,85 @@ export class ChatView extends ItemView {
       for (const t of items) {
         const chip = g.createSpan({ cls: `mva-src-chip is-${kind}` });
         setIcon(chip.createSpan({ cls: "mva-src-ico" }), icon);
-        chip.createSpan({ text: noteBasename(t.path) });
+        chip.createSpan({ cls: "mva-src-name", text: noteBasename(t.path) });
+        if (kind === "write" && (t.count ?? 0) > 1) {
+          chip.createSpan({ cls: "mva-src-count", text: `×${t.count}` });
+        }
         chip.onclick = () => this.openNote(t.path);
+        // Inline diff + revert — only when we hold this turn's pre-write snapshot.
+        const rel = this.relPath(t.path);
+        if (kind === "write" && checkpoint?.has(rel)) {
+          this.addTouchedActions(chip, t.path, checkpoint.get(rel) ?? null);
+        }
       }
     };
     group("Edited", "write", "file-pen"); // changes first — the actionable output
     group("Read", "read", "file-text");
+  }
+
+  /** Hover actions on an edited-note chip: view diff, and a two-step revert. */
+  private addTouchedActions(chip: HTMLElement, path: string, before: string | null): void {
+    const acts = chip.createSpan({ cls: "mva-src-acts" });
+    const diff = acts.createSpan({ cls: "mva-src-act", attr: { "aria-label": "View diff" } });
+    setIcon(diff, "file-diff");
+    diff.onclick = (e) => {
+      e.stopPropagation();
+      void this.showNoteDiff(path, before);
+    };
+
+    const revert = acts.createSpan({ cls: "mva-src-act", attr: { "aria-label": "Revert this note" } });
+    setIcon(revert, "undo-2");
+    let armed = false;
+    let disarm: number | null = null;
+    revert.onclick = (e) => {
+      e.stopPropagation();
+      if (!armed) {
+        armed = true;
+        revert.addClass("is-armed");
+        revert.setAttr("aria-label", "Click again to revert");
+        disarm = window.setTimeout(() => {
+          armed = false;
+          revert.removeClass("is-armed");
+          revert.setAttr("aria-label", "Revert this note");
+        }, 3000);
+        return;
+      }
+      if (disarm) window.clearTimeout(disarm);
+      void this.revertNote(path, before, chip);
+    };
+  }
+
+  /** Open a read-only diff of the note (pre-turn snapshot vs current content). */
+  private async showNoteDiff(path: string, before: string | null): Promise<void> {
+    const f = this.app.vault.getAbstractFileByPath(this.relPath(path));
+    let after = "";
+    if (f instanceof TFile) {
+      try {
+        after = await this.app.vault.read(f);
+      } catch {
+        /* unreadable — show as empty */
+      }
+    }
+    new NoteDiffModal(this.app, noteBasename(path), before, after, () => this.openNote(path)).open();
+  }
+
+  /** Restore a single note to its pre-turn snapshot (null = delete it). */
+  private async revertNote(path: string, before: string | null, chip: HTMLElement): Promise<void> {
+    const rel = this.relPath(path);
+    const f = this.app.vault.getAbstractFileByPath(rel);
+    try {
+      if (before === null) {
+        if (f instanceof TFile) await this.app.vault.delete(f);
+      } else if (f instanceof TFile) {
+        await this.app.vault.modify(f, before);
+      } else {
+        await this.app.vault.create(rel, before);
+      }
+      chip.addClass("is-reverted");
+      new Notice(`Reverted ${noteBasename(path)} to before this turn.`);
+    } catch {
+      new Notice(`Couldn't revert ${noteBasename(path)}.`);
+    }
   }
 
   private flashIcon(btn: HTMLElement, on: string, off: string): void {
@@ -1935,8 +2013,11 @@ export class ChatView extends ItemView {
             if (kind === "read") ctx.sources.add(fp);
             else void this.snapshot(checkpoint, fp); // checkpoint before the write runs
             const existing = ctx.touched.find((t) => t.path === fp);
-            if (!existing) ctx.touched.push({ path: fp, kind });
-            else if (kind === "write") existing.kind = "write"; // read-then-written → show as written
+            if (!existing) ctx.touched.push({ path: fp, kind, ...(kind === "write" ? { count: 1 } : {}) });
+            else if (kind === "write") {
+              existing.kind = "write"; // read-then-written → show as written
+              existing.count = (existing.count ?? 0) + 1;
+            }
           }
           break;
         }
@@ -2009,7 +2090,7 @@ export class ChatView extends ItemView {
       if (timedOut && !ctx.fullText && ctx.cards.size === 0) {
         this.renderError(ctx, `No response — timed out after ${IDLE_TIMEOUT / 1000}s.`);
       }
-      this.attachTouched(ctx.el, ctx.touched);
+      this.attachTouched(ctx.el, ctx.touched, checkpoint);
       if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text, c);
     } catch (err) {
       this.flushRender(ctx);
