@@ -1817,6 +1817,9 @@ export class ChatView extends ItemView {
         if (kind === "write" && checkpoint?.has(rel)) {
           this.addTouchedActions(chip, t.path, checkpoint.get(rel) ?? null);
         }
+        if (kind === "read") {
+          this.addReadActions(chip, t.path);
+        }
       }
     };
     group("Edited", "write", "file-pen"); // changes first — the actionable output
@@ -1852,6 +1855,20 @@ export class ChatView extends ItemView {
       }
       if (disarm) window.clearTimeout(disarm);
       void this.revertNote(path, before, chip);
+    };
+  }
+
+  /** Hover action on a read-note chip: attach it to the composer context. */
+  private addReadActions(chip: HTMLElement, path: string): void {
+    const acts = chip.createSpan({ cls: "mva-src-acts" });
+    const attach = acts.createSpan({ cls: "mva-src-act", attr: { "aria-label": "Attach to context" } });
+    setIcon(attach, "plus");
+    attach.onclick = (e) => {
+      e.stopPropagation();
+      const rel = this.relPath(path);
+      if (!this.manualAttached.includes(rel)) this.manualAttached.push(rel);
+      this.refreshContext();
+      new Notice(`Attached ${noteBasename(path)} to context.`);
     };
   }
 
