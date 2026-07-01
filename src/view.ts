@@ -335,6 +335,7 @@ export class ChatView extends ItemView {
     this.dropSession(this.active);
     this.updateUsage(null);
     this.refreshProviderUI();
+    this.refreshPermChipFn();
   }
 
   /** All selectable model ids for the current provider (built-in + custom + current). */
@@ -1065,17 +1066,31 @@ export class ChatView extends ItemView {
     });
 
     // Permission — Permission-style popover with risk coloring.
+    // Provider-aware: Claude has canUseTool (permission mode gates tool calls);
+    // Codex has no canUseTool — its sandbox setting is the actual gate, so in
+    // Codex mode this chip shows and controls codexSandbox instead.
     this.refreshPermChipFn = this.buildSelectChip(tb, {
       ariaLabel: "Permission mode",
-      getLabel: () => `Perm: ${ChatView.permLabel(s.permissionMode)}`,
+      getLabel: () =>
+        this.provider === "codex"
+          ? `Sandbox: ${ChatView.codexSandboxLabel(s.codexSandbox)}`
+          : `Perm: ${ChatView.permLabel(s.permissionMode)}`,
       getOptions: () =>
-        ChatView.PERM_OPTS.map(([v, l]) => ({ value: v, label: l, risk: ChatView.permRisk(v) })),
-      getCurrent: () => s.permissionMode,
-      chipRisk: () => ChatView.permRisk(s.permissionMode),
+        this.provider === "codex"
+          ? ChatView.CODEX_SANDBOX_OPTS.map(([v, l]) => ({ value: v, label: l, risk: ChatView.codexSandboxRisk(v) }))
+          : ChatView.PERM_OPTS.map(([v, l]) => ({ value: v, label: l, risk: ChatView.permRisk(v) })),
+      getCurrent: () => (this.provider === "codex" ? s.codexSandbox : s.permissionMode),
+      chipRisk: () =>
+        this.provider === "codex" ? ChatView.codexSandboxRisk(s.codexSandbox) : ChatView.permRisk(s.permissionMode),
       onSelect: (v) => {
-        s.permissionMode = v as typeof s.permissionMode;
-        void this.plugin.saveSettings();
-        this.active.session?.setPermissionMode?.(s.permissionMode);
+        if (this.provider === "codex") {
+          s.codexSandbox = v;
+          void this.plugin.saveSettings();
+        } else {
+          s.permissionMode = v as typeof s.permissionMode;
+          void this.plugin.saveSettings();
+          this.active.session?.setPermissionMode?.(s.permissionMode);
+        }
       },
     });
 
@@ -1185,6 +1200,21 @@ export class ChatView extends ItemView {
   private static permRisk(mode: string): RiskLevel {
     if (mode === "bypassPermissions") return "is-danger";
     if (mode === "acceptEdits") return "is-caution";
+    return "";
+  }
+
+  /** Codex sandbox options (Codex has no canUseTool — its sandbox is the gate). */
+  private static readonly CODEX_SANDBOX_OPTS: [string, string][] = [
+    ["read-only", "Read-only"],
+    ["workspace-write", "Workspace write"],
+    ["danger-full-access", "Full access"],
+  ];
+  private static codexSandboxLabel(mode: string): string {
+    return ChatView.CODEX_SANDBOX_OPTS.find(([v]) => v === mode)?.[1] ?? mode;
+  }
+  private static codexSandboxRisk(mode: string): RiskLevel {
+    if (mode === "danger-full-access") return "is-danger";
+    if (mode === "workspace-write") return "is-caution";
     return "";
   }
 
