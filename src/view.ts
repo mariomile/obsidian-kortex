@@ -227,6 +227,11 @@ export class ChatView extends ItemView {
     for (const c of this.convos) this.dropSession(c);
   }
 
+  /** Focus the composer input — called when the view is opened via ribbon/command. */
+  focusComposer(): void {
+    window.setTimeout(() => this.inputEl?.focus(), 0);
+  }
+
   /* --------------------------- session mgmt ------------------------- */
 
   private sessionSigOf(c: Convo): string {
@@ -844,6 +849,11 @@ export class ChatView extends ItemView {
       if (e.key === "Tab" && e.shiftKey) {
         e.preventDefault();
         this.togglePlanMode();
+        return;
+      }
+      if (e.key === "Escape" && this.streaming) {
+        e.preventDefault();
+        this.stop();
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {

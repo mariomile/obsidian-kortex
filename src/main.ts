@@ -76,7 +76,10 @@ export default class ExoPlugin extends Plugin {
       leaf = workspace.getRightLeaf(false);
       await leaf?.setViewState({ type: VIEW_TYPE, active: true });
     }
-    if (leaf) workspace.revealLeaf(leaf);
+    if (leaf) {
+      workspace.revealLeaf(leaf);
+      if (leaf.view instanceof ChatView) leaf.view.focusComposer();
+    }
   }
 
   private vaultPath(): string {
