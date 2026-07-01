@@ -1204,80 +1204,60 @@ export class ChatView extends ItemView {
   private refreshContext(): void {
     if (!this.contextEl) return;
     this.contextEl.empty();
-    // The active note gets a rich "current document" card (Craft-style).
+    // Every context note is a uniform card in a horizontal row (Craft-style):
+    // the active note first ("Current Document"), then manual attachments.
     const active = this.excludeActiveNote ? null : this.activeNotePath();
-    if (active) this.renderDocCard(active);
-    // Manually-attached notes stay compact chips, plus the "+ Note" button.
-    const chips = this.contextEl.createDiv({ cls: "mva-chips" });
-    for (const p of this.manualAttached) this.addChip(chips, p);
-    const add = chips.createDiv({ cls: "mva-chip mva-chip-add", attr: { "aria-label": "Attach a note" } });
-    setIcon(add.createSpan({ cls: "mva-chip-icon" }), "plus");
-    add.createSpan({ cls: "mva-chip-label", text: "Note" });
+    const cards = this.contextEl.createDiv({ cls: "mva-doc-cards" });
+    if (active) this.renderContextCard(cards, active, true);
+    for (const p of this.manualAttached) {
+      if (p !== active) this.renderContextCard(cards, p, false);
+    }
+    // Trailing "add note" card.
+    const add = cards.createDiv({ cls: "mva-doc-card mva-doc-add", attr: { "aria-label": "Attach a note" } });
+    setIcon(add.createSpan({ cls: "mva-doc-add-ico" }), "plus");
+    add.createSpan({ text: "Add note" });
     add.onclick = () => this.pickNote();
   }
 
-  /** Rich card for the active note in context: title + folder·date + text preview. */
-  private renderDocCard(path: string): void {
-    const card = this.contextEl.createDiv({ cls: "mva-doc-card", attr: { "aria-label": "Current document" } });
-    setIcon(card.createDiv({ cls: "mva-doc-ico" }), "file-text");
+  /** A uniform context card: text thumbnail + title + kind ("Current Document" / "Document"). */
+  private renderContextCard(parent: HTMLElement, path: string, isActive: boolean): void {
+    const card = parent.createDiv({ cls: "mva-doc-card" });
+    const thumb = card.createDiv({ cls: "mva-doc-thumb" });
+    void this.fillThumb(thumb, path);
     const body = card.createDiv({ cls: "mva-doc-body" });
-    const top = body.createDiv({ cls: "mva-doc-top" });
-    top.createSpan({ cls: "mva-doc-title", text: noteBasename(path) });
-    const meta = this.docMeta(path);
-    if (meta) top.createSpan({ cls: "mva-doc-meta", text: meta });
-    const preview = body.createDiv({ cls: "mva-doc-preview" });
-    void this.fillPreview(preview, path);
+    body.createDiv({ cls: "mva-doc-title", text: noteBasename(path), attr: { title: path } });
+    body.createDiv({ cls: "mva-doc-kind", text: isActive ? "Current Document" : "Document" });
     const x = card.createSpan({ cls: "mva-doc-x", attr: { "aria-label": "Remove from context" } });
     setIcon(x, "x");
     x.onclick = (e) => {
       e.stopPropagation();
-      this.excludeActiveNote = true;
+      if (isActive) this.excludeActiveNote = true;
+      else this.manualAttached = this.manualAttached.filter((p) => p !== path);
       this.refreshContext();
     };
     card.onclick = () => this.openNote(path);
   }
 
-  /** "Folder · modified date" line for the doc card. */
-  private docMeta(path: string): string {
-    const parts: string[] = [];
-    const slash = path.lastIndexOf("/");
-    if (slash > 0) parts.push(path.slice(0, slash).split("/").pop() ?? "");
+  /** Fill a card thumbnail with a tiny text preview of the note (a "document" look). */
+  private async fillThumb(el: HTMLElement, path: string): Promise<void> {
     const f = this.app.vault.getAbstractFileByPath(path);
-    if (f instanceof TFile && f.stat?.mtime) parts.push(this.formatDate(f.stat.mtime));
-    return parts.filter(Boolean).join(" · ");
-  }
-
-  /** Fill the doc-card preview with the note's first lines (frontmatter stripped). */
-  private async fillPreview(el: HTMLElement, path: string): Promise<void> {
-    const f = this.app.vault.getAbstractFileByPath(path);
-    if (!(f instanceof TFile)) return;
+    if (!(f instanceof TFile)) {
+      setIcon(el, "file-text");
+      return;
+    }
     try {
       let txt = await this.app.vault.cachedRead(f);
       txt = txt
         .replace(/^---\n[\s\S]*?\n---\n?/, "") // drop frontmatter
         .replace(/!?\[\[[^\]]*\]\]/g, " ") // drop embeds / wikilinks
         .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // md links → their text
-        .replace(/^\s*#{1,6}\s+.*(?:\n|$)/, "") // drop a leading heading (dupes the title)
-        .replace(/[#>*_`~]/g, "") // strip remaining marks
-        .replace(/\s+/g, " ")
+        .replace(/[#>*_`~]/g, "")
         .trim();
-      if (txt) el.setText(txt.slice(0, 140));
-      else el.remove();
+      if (txt) el.setText(txt.slice(0, 260));
+      else setIcon(el, "file-text");
     } catch {
-      el.remove();
+      setIcon(el, "file-text");
     }
-  }
-
-  private addChip(parent: HTMLElement, path: string): void {
-    const chip = parent.createDiv({ cls: "mva-chip" });
-    setIcon(chip.createSpan({ cls: "mva-chip-icon" }), "file-text");
-    chip.createSpan({ cls: "mva-chip-label", text: noteBasename(path) });
-    const x = chip.createSpan({ cls: "mva-chip-x", attr: { "aria-label": "Remove" } });
-    setIcon(x, "x");
-    x.onclick = () => {
-      this.manualAttached = this.manualAttached.filter((p) => p !== path);
-      this.refreshContext();
-    };
   }
 
   private pickNote(): void {
