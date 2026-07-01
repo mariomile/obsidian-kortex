@@ -14,7 +14,7 @@ export default class KortexPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new ChatView(leaf, this));
 
-    this.addRibbonIcon("bot", "Open Exo", () => this.activateView());
+    this.addRibbonIcon("sparkle", "Open Exo", () => this.activateView());
 
     this.addCommand({
       id: "open-chat",

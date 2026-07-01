@@ -8,6 +8,8 @@ import {
   TFolder,
   setIcon,
   Notice,
+  Menu,
+  Keymap,
 } from "obsidian";
 import { Autocomplete, type AcItem } from "./ui/autocomplete";
 import type KortexPlugin from "./main";
@@ -151,8 +153,8 @@ export class ChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private brandDot!: HTMLElement;
-  private providerSelect!: HTMLSelectElement;
-  private modelSelect!: HTMLSelectElement;
+  private providerChip!: HTMLElement;
+  private modelChip!: HTMLElement;
   private permChip!: HTMLElement;   // custom chip replacing native <select>
   private contextEl!: HTMLElement;
   private excludeActiveNote = false;
@@ -173,7 +175,7 @@ export class ChatView extends ItemView {
     return "Exo";
   }
   getIcon(): string {
-    return "bot";
+    return "sparkle";
   }
 
   private get listEl(): HTMLElement {
@@ -187,6 +189,14 @@ export class ChatView extends ItemView {
     this.buildHeader(root);
     this.tabsEl = root.createDiv({ cls: "mva-tabs" });
     this.listWrap = root.createDiv({ cls: "mva-list-wrap" });
+    // Wire up internal-link clicks in rendered markdown (MarkdownRenderer doesn't do this for custom views).
+    this.registerDomEvent(this.listWrap, "click", (e) => {
+      const a = (e.target as HTMLElement).closest("a.internal-link") as HTMLElement | null;
+      if (!a) return;
+      e.preventDefault();
+      const href = a.getAttr("data-href") || a.getAttr("href") || a.textContent || "";
+      if (href) void this.app.workspace.openLinkText(href, "", Keymap.isModEvent(e));
+    });
     this.buildComposer(root);
     await this.restore();
     this.refreshContext();
@@ -284,6 +294,10 @@ export class ChatView extends ItemView {
     header.createSpan({ cls: "mva-brand-name", text: "Exo" });
     header.createDiv({ cls: "mva-spacer" }).style.flex = "1";
 
+    const caps = header.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "Capabilities" } });
+    setIcon(caps, "blocks");
+    caps.onclick = () => this.toggleCapabilities();
+
     const histBtn = header.createEl("button", { cls: "mva-icon-btn", attr: { "aria-label": "History" } });
     setIcon(histBtn, "history");
     histBtn.onclick = () => this.toggleGallery();
@@ -294,10 +308,7 @@ export class ChatView extends ItemView {
   }
 
   private onProviderChange(next: ProviderId): void {
-    if (this.streaming || next === this.provider) {
-      this.providerSelect.value = this.provider; // revert if blocked
-      return;
-    }
+    if (this.streaming || next === this.provider) return;
     this.provider = next;
     this.model = next === "claude" ? this.plugin.settings.claudeModel : this.plugin.settings.codexModel;
     this.active.provider = next;
@@ -309,16 +320,13 @@ export class ChatView extends ItemView {
     this.refreshProviderUI();
   }
 
-  private refreshProviderUI(): void {
+  /** All selectable model ids for the current provider (built-in + custom + current). */
+  private modelChoices(): { id: string; label: string }[] {
     const a = ADAPTERS[this.provider];
-    this.providerSelect.value = this.provider;
-    this.brandDot.style.background = a.brandColor;
-    this.brandDot.style.color = a.brandColor;
-    this.contentEl.style.setProperty("--mva-brand", a.brandColor);
-    this.modelSelect.empty();
+    const out: { id: string; label: string }[] = [];
     const seen = new Set<string>();
     for (const m of a.models()) {
-      this.modelSelect.createEl("option", { text: m.label }).value = m.id;
+      out.push({ id: m.id, label: m.label });
       seen.add(m.id);
     }
     const custom = this.provider === "claude"
@@ -327,13 +335,24 @@ export class ChatView extends ItemView {
     for (const id of custom.split(/[\n,]/).map((x) => x.trim()).filter(Boolean)) {
       if (seen.has(id)) continue;
       seen.add(id);
-      this.modelSelect.createEl("option", { text: id }).value = id;
+      out.push({ id, label: id });
     }
-    // Keep a custom current model selectable even if not yet listed.
-    if (this.model && !seen.has(this.model)) {
-      this.modelSelect.createEl("option", { text: this.model }).value = this.model;
-    }
-    this.modelSelect.value = this.model || "";
+    if (this.model && !seen.has(this.model)) out.push({ id: this.model, label: this.model });
+    return out;
+  }
+
+  private modelLabel(): string {
+    const found = this.modelChoices().find((m) => m.id === this.model);
+    return found?.label || this.model || "Model";
+  }
+
+  private refreshProviderUI(): void {
+    const a = ADAPTERS[this.provider];
+    this.brandDot.style.background = a.brandColor;
+    this.brandDot.style.color = a.brandColor;
+    this.contentEl.style.setProperty("--mva-brand", a.brandColor);
+    if (this.providerChip) this.providerChip.setText(a.displayName);
+    if (this.modelChip) this.modelChip.setText(this.modelLabel());
   }
 
   private persistModel(): void {
@@ -764,10 +783,12 @@ export class ChatView extends ItemView {
     this.composerEl = bar;
     this.contextEl = bar.createDiv({ cls: "mva-context" });
     this.imagesEl = bar.createDiv({ cls: "mva-images is-hidden" });
-    const row = bar.createDiv({ cls: "mva-input-row" });
-    this.inputEl = row.createEl("textarea", {
+
+    // One unified input box (the only surface): textarea on top, controls at the bottom.
+    const box = bar.createDiv({ cls: "mva-inputbox" });
+    this.inputEl = box.createEl("textarea", {
       cls: "mva-input",
-      attr: { rows: "2", placeholder: "Message the agent…   ⏎ send · ⇧⏎ newline" },
+      attr: { rows: "1", placeholder: "Message the agent…" },
     });
     this.inputEl.addEventListener("input", () => this.autoGrow());
     this.inputEl.addEventListener("paste", (e) => this.onPaste(e));
@@ -793,17 +814,14 @@ export class ChatView extends ItemView {
         void this.send(); // send() queues if the active conversation is streaming
       }
     });
-    this.sendBtn = row.createEl("button", { cls: "mva-send", attr: { "aria-label": "Send" } });
-    setIcon(this.sendBtn, "arrow-up");
-    this.sendBtn.onclick = () => (this.streaming ? this.stop() : void this.send());
 
-    new Autocomplete(this.inputEl, row, [
+    new Autocomplete(this.inputEl, box, [
       { trigger: "/", getItems: (q) => this.slashItems(q) },
       { trigger: "$", getItems: (q) => this.skillItems(q) },
       { trigger: "@", getItems: (q) => this.atItems(q) },
     ]);
 
-    this.buildToolbar(bar);
+    this.buildToolbar(box);
   }
 
   /* ----------------------------- images ----------------------------- */
@@ -976,27 +994,45 @@ export class ChatView extends ItemView {
 
   private buildToolbar(bar: HTMLElement): void {
     const tb = bar.createDiv({ cls: "mva-toolbar" });
-    const s = this.plugin.settings;
 
-    // Provider (type) + model selects — all controls live in this bottom bar.
-    this.providerSelect = tb.createEl("select", { cls: "mva-tb-sel", attr: { "aria-label": "Provider" } });
-    for (const id of ["claude", "codex"] as ProviderId[]) {
-      this.providerSelect.createEl("option", { text: ADAPTERS[id].displayName }).value = id;
-    }
-    this.providerSelect.onchange = () => this.onProviderChange(this.providerSelect.value as ProviderId);
+    // Provider — Obsidian menu (no native <select>).
+    this.providerChip = tb.createDiv({ cls: "mva-tb-chip", attr: { "aria-label": "Provider" } });
+    this.providerChip.setText(ADAPTERS[this.provider].displayName);
+    this.providerChip.onclick = (e) => {
+      const menu = new Menu();
+      for (const id of ["claude", "codex"] as ProviderId[]) {
+        menu.addItem((it) =>
+          it
+            .setTitle(ADAPTERS[id].displayName)
+            .setChecked(id === this.provider)
+            .onClick(() => this.onProviderChange(id))
+        );
+      }
+      menu.showAtMouseEvent(e);
+    };
 
-    this.modelSelect = tb.createEl("select", { cls: "mva-tb-sel", attr: { "aria-label": "Model" } });
-    this.modelSelect.onchange = () => {
-      this.model = this.modelSelect.value;
-      this.persistModel();
+    // Model — Obsidian menu.
+    this.modelChip = tb.createDiv({ cls: "mva-tb-chip", attr: { "aria-label": "Model" } });
+    this.modelChip.setText(this.modelLabel());
+    this.modelChip.onclick = (e) => {
+      const menu = new Menu();
+      for (const m of this.modelChoices()) {
+        menu.addItem((it) =>
+          it
+            .setTitle(m.label)
+            .setChecked(m.id === this.model)
+            .onClick(() => {
+              this.model = m.id;
+              this.modelChip.setText(this.modelLabel());
+              this.persistModel();
+            })
+        );
+      }
+      menu.showAtMouseEvent(e);
     };
 
     this.buildEffort(tb);
     this.buildPerm(tb);
-
-    const caps = tb.createEl("button", { cls: "mva-tb-icon", attr: { "aria-label": "Capabilities" } });
-    setIcon(caps, "layout-dashboard");
-    caps.onclick = () => this.toggleCapabilities();
 
     tb.createDiv({ cls: "mva-spacer" }).style.flex = "1";
     this.usageEl = tb.createDiv({
@@ -1004,6 +1040,11 @@ export class ChatView extends ItemView {
       attr: { "aria-label": "Context used — click to compact" },
     });
     this.usageEl.onclick = () => this.compactActive();
+
+    // Send button — lives inside the input box, right side.
+    this.sendBtn = tb.createEl("button", { cls: "mva-send", attr: { "aria-label": "Send" } });
+    setIcon(this.sendBtn, "arrow-up");
+    this.sendBtn.onclick = () => (this.streaming ? this.stop() : void this.send());
   }
 
   /** Effort control: a chip that opens a Faster→Smarter dotted popover. */
@@ -1078,11 +1119,6 @@ export class ChatView extends ItemView {
     this.usageEl.toggleClass("is-warn", pct >= 80);
   }
 
-  private toolbarSelect(parent: HTMLElement, label: string, opts: [string, string][]): HTMLSelectElement {
-    const sel = parent.createEl("select", { cls: "mva-tb-select", attr: { "aria-label": label } });
-    for (const [v, t] of opts) sel.createEl("option", { text: t }).value = v;
-    return sel;
-  }
 
   /* ---- Permission chip helpers ---- */
   private static readonly PERM_OPTS: [string, string][] = [
@@ -1104,7 +1140,7 @@ export class ChatView extends ItemView {
   /** Custom permission chip (replaces native <select>) with semantic risk color. */
   private buildPerm(tb: HTMLElement): void {
     const s = this.plugin.settings;
-    const wrap = tb.createDiv({ cls: "mva-perm" });
+    const wrap = tb.createDiv({ cls: "mva-permsel" });
     const chip = wrap.createDiv({ cls: "mva-perm-chip", attr: { "aria-label": "Permission mode" } });
     this.permChip = chip;
     const pop = wrap.createDiv({ cls: "mva-perm-pop" });
