@@ -52,6 +52,13 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
+/** Abbreviate a token count with k/M suffixes: 68000 → "68k", 1_500_000 → "1.5M". */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
 function extToMime(ext: string): string {
   const e = ext.toLowerCase();
   if (e === "jpg" || e === "jpeg") return "image/jpeg";
@@ -247,13 +254,10 @@ let convoSeed = 0;
 export class ChatView extends ItemView {
   private provider: ProviderId;
   private model: string;
+  /** Circular context counter (donut ring) in the composer footer. */
   private usageEl: HTMLElement | null = null;
-  private usageModelEl: HTMLElement | null = null;
-  private usageFillEl: HTMLElement | null = null;
-  private usagePctEl: HTMLElement | null = null;
-  private usageCostEl: HTMLElement | null = null;
   /** Last usage payload received (or null) — cached so a model/provider change
-   *  alone (no new 'usage' event) can still re-render the statusline label. */
+   *  alone (no new 'usage' event) can still re-render the counter. */
   private lastUsage: ContextUsage | null = null;
 
   /** Active conversation is streaming (drives the send/stop button). */
@@ -1542,16 +1546,10 @@ export class ChatView extends ItemView {
     });
 
     tb.createDiv({ cls: "mva-spacer" }).style.flex = "1";
-    this.usageEl = tb.createDiv({
-      cls: "mva-usage",
-      attr: { "aria-label": "Context used — click to compact" },
-    });
-    this.usageEl.onclick = () => this.compactActive();
-    this.usageModelEl = this.usageEl.createSpan({ cls: "mva-usage-model" });
-    const usageBar = this.usageEl.createDiv({ cls: "mva-usage-bar" });
-    this.usageFillEl = usageBar.createDiv({ cls: "mva-usage-fill" });
-    this.usagePctEl = this.usageEl.createSpan({ cls: "mva-usage-pct" });
-    this.usageCostEl = this.usageEl.createSpan({ cls: "mva-usage-cost" });
+    // Context usage as a compact circular counter (donut ring). Hover for the
+    // detailed breakdown, click to compact. See updateUsage for the fill logic.
+    this.usageEl = tb.createDiv({ cls: "mva-ctx-ring" });
+    this.clickable(this.usageEl, () => this.compactActive());
     this.updateUsage(null);
 
     // Send button — lives inside the input box, right side.
@@ -1630,50 +1628,52 @@ export class ChatView extends ItemView {
   }
 
   /**
-   * Single entry point for the composer footer's context-usage statusline
-   * (fill bar + % + model label + session cost). Called after every 'usage'
-   * event and whenever model/provider changes so the label stays in sync even
-   * without a fresh event. NOTE for M3 (guided compaction): the >=75% trigger
-   * should hook in here — this stays the one place usage state is rendered.
+   * Single entry point for the composer footer's circular context counter
+   * (donut ring). Sets --pct (0-100) and --ring-color on the ring element and
+   * a hover/aria tooltip with the used/total breakdown. Called after every
+   * 'usage' event and whenever model/provider changes so it stays in sync even
+   * without a fresh event. NOTE: the >=75% compact nudge hooks in here — this
+   * stays the one place usage state is rendered, so that trigger keeps firing.
    */
   private updateUsage(u: ContextUsage | null): void {
-    if (!this.usageEl) return;
+    const ring = this.usageEl;
+    if (!ring) return;
     this.lastUsage = u;
-    this.usageModelEl?.setText(this.modelLabel());
 
-    this.usageEl.removeClass("is-caution");
-    this.usageEl.removeClass("is-danger");
+    ring.removeClass("is-caution");
+    ring.removeClass("is-danger");
 
+    // Fresh session / provider that doesn't report usage (Codex): empty ring.
     if (!u || !u.total) {
-      this.usageEl.addClass("is-empty");
-      if (this.usageFillEl) this.usageFillEl.style.transform = "scaleX(0)";
-      this.usagePctEl?.setText("");
-      this.usageCostEl?.setText("");
+      ring.addClass("is-empty");
+      ring.style.setProperty("--pct", "0");
+      ring.style.setProperty("--ring-color", "var(--interactive-accent)");
+      const tip = "Context usage appears after the first reply";
+      setTooltip(ring, tip);
+      ring.setAttribute("aria-label", tip);
       this.hideCompactNudge();
       return;
     }
 
-    this.usageEl.removeClass("is-empty");
+    ring.removeClass("is-empty");
     const pct = Math.min(100, Math.round((u.used / u.total) * 100));
-    if (this.usageFillEl) this.usageFillEl.style.transform = `scaleX(${pct / 100})`;
-    this.usagePctEl?.setText(`${pct}%`);
-
     const risk: RiskLevel = pct >= 90 ? "is-danger" : pct >= 75 ? "is-caution" : "";
-    if (risk) this.usageEl.addClass(risk);
+    const color = pct >= 90 ? "var(--color-red)" : pct >= 75 ? "var(--color-orange)" : "var(--interactive-accent)";
+    ring.style.setProperty("--pct", String(pct));
+    ring.style.setProperty("--ring-color", color);
+    if (risk) ring.addClass(risk);
+
+    // Cost lives in the tooltip only (Codex omits it; Claude omits it when the
+    // experimental SDK cost API is unavailable) — never a broken/empty footer.
+    const costPart = typeof u.costUsd === "number" ? ` · $${u.costUsd.toFixed(2)}` : "";
+    const tip = `Context: ${pct}% — ~${fmtTokens(u.used)} / ${fmtTokens(u.total)} tokens${costPart} · click to compact`;
+    setTooltip(ring, tip);
+    ring.setAttribute("aria-label", tip);
 
     // Proactive one-shot nudge: once context crosses 75% (same threshold as the
-    // bar's caution state), suggest compacting. Shown at most once per convo.
+    // ring's caution state), suggest compacting. Shown at most once per convo.
     if (pct >= 75) this.maybeShowCompactNudge();
     else this.hideCompactNudge();
-
-    // Codex never emits usage events (no cost field either) — Claude sessions
-    // omit costUsd when the experimental SDK cost API is unavailable. Either
-    // way: no cost data means no cost text, never a broken/placeholder UI.
-    if (typeof u.costUsd === "number") {
-      this.usageCostEl?.setText(`$${u.costUsd.toFixed(2)}`);
-    } else {
-      this.usageCostEl?.setText("");
-    }
   }
 
   /** Show the discreet ≥75% compaction nudge under the composer — one-shot per
