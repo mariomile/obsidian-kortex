@@ -249,6 +249,16 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   box-sizing: border-box;
 }
 
+/* Bottom-anchor the flow: on tall panes a short conversation should sit against
+   the composer, not float at the top over a dead void. A flex column whose first
+   child has `margin-top: auto` pushes content down when short and scrolls
+   normally when it overflows (no justify-content — that breaks scrollability in
+   Chromium). Excludes the empty state, which centers itself via `margin-block:
+   auto`. Only margin-top is set, so the column-centering margins above stand. */
+.mva-list > :not(.mva-empty):first-child {
+  margin-top: auto;
+}
+
 .mva-turn {
   display: flex;
   flex-direction: column;
