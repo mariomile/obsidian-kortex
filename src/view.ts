@@ -22,7 +22,7 @@ import type {
   ImageAttachment,
   ProviderId,
 } from "./providers/types";
-import { toolMeta, toolFilePath, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
+import { toolMeta, toolFilePath, toolWorkingLabel, renderToolDetail, READ_ONLY_TOOLS } from "./ui/tools";
 import { createObsidianToolServer, OBSIDIAN_READ_TOOLS, OBSIDIAN_MEMORY_TOOLS } from "./obsidian/tools";
 import { readBootContext } from "./obsidian/memory";
 import { relatedNotes, basename as noteBasename } from "./obsidian/graph";
@@ -173,6 +173,11 @@ interface AssistantCtx {
   taskCards: Map<string, { container: HTMLElement; summaryEl: HTMLElement; rowsEl: HTMLElement; count: number }>;
   /** Subagent mini-rows this turn (live-only): tool-call id → status dot + parent. */
   nestedRows: Map<string, { dotEl: HTMLElement; parentId: string }>;
+  /** Working-indicator row (Feature 1) — star + phase label + elapsed + esc hint.
+   *  Always re-appended as the last child of bodyEl so it trails the transcript. */
+  workingEl: HTMLElement | null;
+  workingLabel: HTMLElement | null;
+  workingElapsed: HTMLElement | null;
 }
 
 /** Abort a turn if no event arrives for this long (avoids infinite loading). */
@@ -1947,6 +1952,9 @@ export class ChatView extends ItemView {
       bgTasks: new Map(),
       taskCards: new Map(),
       nestedRows: new Map(),
+      workingEl: null,
+      workingLabel: null,
+      workingElapsed: null,
     };
     this.scrollConvo(c);
     return ctx;
@@ -1970,6 +1978,49 @@ export class ChatView extends ItemView {
   private dropThinking(ctx: AssistantCtx): void {
     ctx.thinkingEl?.remove();
     ctx.thinkingEl = null;
+  }
+
+  /* ------------------------- working indicator ---------------------- */
+
+  /** Create (once) the Claude-Code-style "working" row and move it to be the LAST
+   *  child of bodyEl so it always trails the transcript, then show it. */
+  private ensureWorking(ctx: AssistantCtx): void {
+    let el = ctx.workingEl;
+    if (!el) {
+      el = createDiv({ cls: "mva-working" });
+      setIcon(el.createSpan({ cls: "mva-working-star" }), EXO_ICON);
+      ctx.workingLabel = el.createSpan({ cls: "mva-working-label", text: "Thinking…" });
+      ctx.workingElapsed = el.createSpan({ cls: "mva-working-elapsed" });
+      el.createSpan({ cls: "mva-working-hint", text: "esc to stop" });
+      ctx.workingEl = el;
+    }
+    ctx.bodyEl.appendChild(el); // re-append: always the last element
+    el.show();
+  }
+
+  /** Hide the working row (streaming text / an open interactive card takes over). */
+  private hideWorking(ctx: AssistantCtx): void {
+    ctx.workingEl?.hide();
+  }
+
+  /** Set the working row's phase label (no-op if the row was never created). */
+  private setWorkingLabel(ctx: AssistantCtx, text: string): void {
+    ctx.workingLabel?.setText(text);
+  }
+
+  /** Remove the working row entirely (turn end / error). */
+  private removeWorking(ctx: AssistantCtx): void {
+    ctx.workingEl?.remove();
+    ctx.workingEl = null;
+    ctx.workingLabel = null;
+    ctx.workingElapsed = null;
+  }
+
+  /** Human elapsed: `37s` under a minute, `1m 12s` past it. */
+  private fmtDuration(ms: number): string {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
   }
 
   private appendText(ctx: AssistantCtx, text: string): void {
@@ -2785,6 +2836,7 @@ export class ChatView extends ItemView {
   ): void {
     this.dropThinking(ctx);
     this.resetTextStream(ctx);
+    this.hideWorking(ctx); // the ask card is the feedback while it waits
     const card = ctx.bodyEl.createDiv({ cls: "mva-ask" });
     const answers: Record<string, string> = {};
     const seg: Segment = { t: "ask", questions, answers };
@@ -3103,6 +3155,15 @@ export class ChatView extends ItemView {
     c.stopped = false;
     this.setStreaming(c, true);
 
+    // Working indicator (Feature 1): a persistent Claude-Code-style row so the
+    // turn never looks dead between send/tools/output. One ticking timer per turn.
+    const turnStart = Date.now();
+    this.dropThinking(ctx); // the working row replaces the placeholder dots
+    this.ensureWorking(ctx);
+    const workingTimer = window.setInterval(() => {
+      if (ctx.workingElapsed) ctx.workingElapsed.setText(`· ${this.fmtDuration(Date.now() - turnStart)}`);
+    }, 1000);
+
     const adapter = ADAPTERS[c.provider];
     const s = this.plugin.settings;
 
@@ -3150,20 +3211,25 @@ export class ChatView extends ItemView {
       bump();
       switch (e.kind) {
         case "text-delta":
+          this.hideWorking(ctx); // the streaming caret takes over
           this.appendText(ctx, e.text);
           break;
         case "thinking-delta":
           this.appendReasoning(ctx, e.text);
+          this.setWorkingLabel(ctx, "Thinking…");
+          this.ensureWorking(ctx); // re-append last; thinking may be collapsed
           break;
         case "tool-call-start": {
           if (e.name === "TodoWrite") {
             this.renderTodos(ctx, e.input);
+            this.ensureWorking(ctx); // keep the row below the todos panel
             break;
           }
           if (e.name === "mcp__obsidian__ask_user") {
             // The card is rendered by askBridge; suspend the watchdog until answered.
             askIds.add(e.id);
             suspendWatchdog();
+            this.hideWorking(ctx); // the ask card is the feedback
             break;
           }
           // File tracking runs before the nesting branch: subagent writes must stay
@@ -3185,16 +3251,23 @@ export class ChatView extends ItemView {
           // Feature 4: a subagent's tool call nests under its parent Task card
           // (ephemeral, live-only). Falls through to a flat card if the parent
           // isn't tracked, so nothing is lost.
-          if (e.parentId && this.addSubagentRow(ctx, e.parentId, e.id, e.name, e.input)) break;
-          this.addToolCard(ctx, e.id, e.name, e.input);
-          if (e.name === "Task") this.registerTaskCard(ctx, e.id);
-          this.trackBackgroundTask(ctx, e.id, e.name, e.input);
+          if (!(e.parentId && this.addSubagentRow(ctx, e.parentId, e.id, e.name, e.input))) {
+            this.addToolCard(ctx, e.id, e.name, e.input);
+            if (e.name === "Task") this.registerTaskCard(ctx, e.id);
+            this.trackBackgroundTask(ctx, e.id, e.name, e.input);
+          }
+          // Working row: phase verb from the tool metadata, re-appended last so it
+          // stays visible below the tool card during execution.
+          this.setWorkingLabel(ctx, toolWorkingLabel(e.name, e.input));
+          this.ensureWorking(ctx);
           break;
         }
         case "tool-call-result": {
           if (askIds.has(e.id)) {
             askIds.delete(e.id);
             resumeWatchdog(); // the ask card has been answered/dismissed
+            this.setWorkingLabel(ctx, "Thinking…");
+            this.ensureWorking(ctx); // the turn continues
             break;
           }
           // Feature 4: a nested subagent result updates its mini-row, not a card —
@@ -3222,6 +3295,10 @@ export class ChatView extends ItemView {
               this.renderArtifactCard(ctx, rel);
             }
           }
+          // The text segment (if any) ended before this tool ran — re-show the
+          // working row while the agent decides what to do next.
+          this.setWorkingLabel(ctx, "Thinking…");
+          this.ensureWorking(ctx);
           break;
         }
         case "permission-request": {
@@ -3254,8 +3331,10 @@ export class ChatView extends ItemView {
           } else {
             // An open permission card also suspends the watchdog while the user decides.
             suspendWatchdog();
+            this.hideWorking(ctx); // the card waiting for the user is the feedback
             this.addPermissionCard(ctx, c, e.tool, e.input, (d) => {
               resumeWatchdog();
+              this.ensureWorking(ctx); // the turn continues once resolved
               if (d.behavior === "allow") allow(d);
               else e.resolve(d);
             });
@@ -3278,6 +3357,7 @@ export class ChatView extends ItemView {
         case "error":
           this.dropThinking(ctx);
           this.resetTextStream(ctx);
+          this.removeWorking(ctx);
           if (c.stopped) {
             // User pressed Stop — the provider reports an execution error as it
             // unwinds; render it as a clean stop, not a scary error.
@@ -3334,6 +3414,8 @@ export class ChatView extends ItemView {
       }
     } finally {
       if (watchdog !== null) window.clearTimeout(watchdog);
+      window.clearInterval(workingTimer); // stop the elapsed ticker
+      this.removeWorking(ctx); // drop the working row for good
       await Promise.all(snapshots); // finalize the checkpoint even if the turn errored
       // If the turn died with an interactive card still open (session crash while a
       // permission/ask was pending), CANCEL it — otherwise the card stays live in

@@ -117,6 +117,39 @@ function baseMeta(name: string, input: unknown): Omit<ToolMeta, "openPath"> {
   }
 }
 
+/** Present-tense phase label for the working indicator row (Feature 1 — the
+ *  "sta lavorando" row). Reuses toolMeta's label for anything not special-cased,
+ *  so it always tracks the tool metadata (fallback "Working…"). */
+export function toolWorkingLabel(name: string, input: unknown): string {
+  switch (name) {
+    case "Read":
+      return "Reading note…";
+    case "Write":
+      return "Writing note…";
+    case "Edit":
+    case "MultiEdit":
+      return "Editing…";
+    case "NotebookEdit":
+      return "Editing notebook…";
+    case "Bash":
+      return "Running command…";
+    case "Glob":
+      return "Finding files…";
+    case "Grep":
+      return "Searching…";
+    case "LS":
+      return "Listing files…";
+    case "WebFetch":
+      return "Fetching URL…";
+    case "WebSearch":
+      return "Searching the web…";
+    case "Task":
+      return "Running subagent…";
+  }
+  const label = baseMeta(name, input).label;
+  return label ? `${label}…` : "Working…";
+}
+
 /** Render the detail body for a tool (diff / command / params). */
 export function renderToolDetail(el: HTMLElement, name: string, input: unknown, _result: unknown): void {
   const i = rec(input);
