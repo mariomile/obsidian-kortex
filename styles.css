@@ -25,6 +25,13 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   padding: 0;
 }
 
+/* Keyboard focus ring for every focusable control inside the view. */
+.mva-root :focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-radius: var(--mva-r1);
+}
+
 /* ------------------------------- header ------------------------------- */
 .mva-header {
   display: flex;
@@ -181,10 +188,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-tab-add .svg-icon {
   width: 14px;
   height: 14px;
-}
-@keyframes mva-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 .mva-list-wrap {
@@ -360,7 +363,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-faint);
+  color: var(--text-muted);
   margin-bottom: 6px;
 }
 .mva-todos-head .svg-icon {
@@ -650,7 +653,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 .mva-doc-kind {
   font-size: 10px;
-  color: var(--text-faint);
+  color: var(--text-muted);
   margin-top: 1px;
 }
 .mva-doc-x {
@@ -880,7 +883,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-faint);
+  color: var(--text-muted);
   margin-bottom: 7px;
 }
 .mva-starters {
@@ -982,7 +985,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-normal);
 }
 .mva-tool-target {
-  color: var(--text-faint);
+  color: var(--text-muted);
   font-family: var(--font-monospace);
   font-size: 11.5px;
   white-space: nowrap;
@@ -1379,9 +1382,6 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   width: 14px;
   height: 14px;
 }
-@keyframes mva-spin {
-  to { transform: rotate(360deg); }
-}
 
 /* ----------------------- prompt variables modal ----------------------- */
 .mva-pv-row { margin-bottom: 12px; }
@@ -1479,7 +1479,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 .mva-src-chip {
   display: inline-flex;
@@ -1624,7 +1624,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 .mva-surface-chips {
   display: flex;
@@ -1774,4 +1774,16 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* Honor the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  .mva-root *,
+  .mva-root *::before,
+  .mva-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .mva-caret { animation: none; opacity: 1; }
 }
