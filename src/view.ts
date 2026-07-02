@@ -3046,10 +3046,13 @@ export class ChatView extends ItemView {
         // connects within a fixed 5s cap; slow startup — e.g. SessionStart
         // hooks — trips it). Nothing user-visible ran, so respawn once and
         // retry invisibly: the CLI is warm now and usually connects in time.
+        // Degraded ≠ poisoned: our message never reached the session (the throw
+        // fires before the queue push), so the CLI-side transcript is intact —
+        // KEEP c.sessionId and let the respawn resume it (dropSession disposes
+        // the process but never clears the resume id).
         // acceptDegraded on the retry: if it's STILL degraded, proceed anyway
         // (built-in tools work; the session warns) — never block the user.
         this.dropSession(c);
-        c.sessionId = undefined;
         session = await this.ensureSession(c);
         await session.send(message, onEvent, imgs, { acceptDegraded: true });
       }
