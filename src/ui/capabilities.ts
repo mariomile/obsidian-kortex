@@ -285,6 +285,10 @@ export async function renderCapabilitiesPanel(
     } else {
       addScope(vaultHooks, "vault");
       addScope(globalHooks, "global");
+      b.createDiv({
+        cls: "mva-faint",
+        text: "Hooks run at session start and per tool call — they add latency if slow.",
+      });
     }
   }
 

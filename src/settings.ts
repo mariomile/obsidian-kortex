@@ -275,7 +275,8 @@ export class MVASettingTab extends PluginSettingTab {
       .setName("Run Claude Code hooks")
       .setDesc(
         "Execute hooks configured in .claude/settings.json (vault and global) — PreToolUse guards, formatters, notifications. " +
-          "Matches Claude Code behavior. Turn off for a slightly faster cold start."
+          "Matches Claude Code behavior. Note: hooks run at session start and on every tool call — heavy or network-bound hooks " +
+          "(check what's in your global settings) slow turns down. Turn off if Exo feels sluggish."
       )
       .addToggle((t) =>
         t.setValue(this.plugin.settings.runHooks).onChange(async (v) => {
