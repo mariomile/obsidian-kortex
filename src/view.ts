@@ -3073,7 +3073,13 @@ export class ChatView extends ItemView {
     } finally {
       if (watchdog !== null) window.clearTimeout(watchdog);
       await Promise.all(snapshots); // finalize the checkpoint even if the turn errored
+      // If the turn died with an interactive card still open (session crash while a
+      // permission/ask was pending), CANCEL it — otherwise the card stays live in
+      // the transcript and the in-process ask promise hangs forever. No-op on clean
+      // turns (both are null once answered) and idempotent (done-guarded).
+      c.pendingPerm?.();
       c.pendingPerm = null;
+      c.pendingAsk?.();
       c.pendingAsk = null;
       // Confirm a user-initiated stop when nothing substantive was rendered.
       if (

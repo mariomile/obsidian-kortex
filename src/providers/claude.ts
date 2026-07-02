@@ -29,6 +29,10 @@ class ClaudeSession implements AgentSession {
   private queue: { role: "user"; content: UserContent }[] = [];
   private wake: (() => void) | null = null;
   private disposed = false;
+  /** True once the SDK message stream has ended (CLI process gone). A dead session
+   *  can never emit a `result`, so sends against it must fail fast instead of
+   *  parking forever (the view drops the session and the next message starts fresh). */
+  private ended = false;
   private onEvent: ((e: AgentEvent) => void) | null = null;
   private resolveTurn: (() => void) | null = null;
   private rejectTurn: ((e: unknown) => void) | null = null;
@@ -177,11 +181,20 @@ class ClaudeSession implements AgentSession {
         if (this.disposed) break;
         this.route(msg);
       }
+      // The stream can complete WITHOUT a `result` for an in-flight turn (CLI
+      // process exited mid-turn). Nothing else will ever settle that send() —
+      // the view would wait forever with the composer stuck on "streaming".
+      // No-op when the turn already settled or on dispose (handles are null).
+      this.denyPending?.();
+      this.settleTurn(new Error("Claude session ended unexpectedly."));
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
       this.denyPending?.();
       this.onEvent?.({ kind: "error", message: m });
       this.settleTurn(err instanceof Error ? err : new Error(m));
+    } finally {
+      this.ended = true;
+      this.markReady(); // never leave a first send parked on init for a dead session
     }
   }
 
@@ -265,6 +278,10 @@ class ClaudeSession implements AgentSession {
     images?: import("./types").ImageAttachment[]
   ): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Session disposed."));
+    // A dead stream can never answer: fail fast so the view drops this session
+    // and the next message starts a fresh one (instead of parking forever — the
+    // idle-session variant of this is a pre-warmed CLI that died while idle).
+    if (this.ended) return Promise.reject(new Error("Claude session ended — sending again starts a fresh session."));
     // Guard against overlapping turns: a second send() while one is in flight would
     // orphan the first promise (its resolve/reject would be overwritten).
     if (this.resolveTurn) return Promise.reject(new Error("A turn is already in flight."));
