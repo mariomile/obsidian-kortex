@@ -159,8 +159,19 @@ export async function renderCapabilitiesPanel(
     }
   };
   const empty = (parent: HTMLElement, text: string) => parent.createDiv({ cls: "mva-faint", text });
+  const tier = (label: string) => {
+    const t = grid.createDiv({ cls: "mva-caps-tier" });
+    t.setText(label);
+    t.style.fontSize = "10.5px";
+    t.style.textTransform = "uppercase";
+    t.style.letterSpacing = "0.06em";
+    t.style.color = "var(--text-muted)";
+    t.style.fontWeight = "600";
+    t.style.marginTop = "6px";
+  };
 
   // Session
+  tier("Session");
   {
     const b = card("Session");
     chip(b, `Provider: ${ctx.provider}`, true);
@@ -170,6 +181,68 @@ export async function renderCapabilitiesPanel(
     chip(b, "Agentic tools", agentic);
     chip(b, "Fast startup", s.fastStartup);
     chip(b, "Native-first", s.nativeFirst);
+  }
+
+  // Knowledge
+  tier("Knowledge");
+  // Memory
+  {
+    const b = card("Vault memory", "_system/");
+    chip(b, "Read at boot", s.memoryReadEnabled && claude);
+    chip(b, "Write (gated)", s.memoryWriteEnabled && claude);
+    const open = (p: string) => () => ctx.onOpenNote(p);
+    chip(b, "vault-context.md", true, "open", open("_system/vault-context.md"));
+    chip(b, "preferences.md", true, "open", open("_system/memory/preferences/preferences.md"));
+    chip(b, "session-log.md", true, "open", open("_system/memory/session-log.md"));
+  }
+
+  // Playbooks
+  tier("Playbooks");
+  // Playbooks (custom prompts; " >>> " = multi-step workflow)
+  {
+    const b = card("Playbooks", "custom prompts + workflows");
+    const prompts = s.customPrompts ?? [];
+    const scheduled = new Set(
+      (s.scheduledRuns ?? "")
+        .split("\n")
+        .map((l) => l.slice(0, l.lastIndexOf("|")).trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (!prompts.length) empty(b, "No playbooks yet — add custom prompts in settings.");
+    for (const p of prompts) {
+      const isWorkflow = p.prompt.includes(" >>> ");
+      const isSched = scheduled.has(p.name.toLowerCase());
+      const steps = isWorkflow ? p.prompt.split(/\s+>>>\s+/).filter(Boolean).length : 0;
+      const label = isSched ? `${p.name} ⏱` : p.name;
+      const desc = isWorkflow ? `workflow · ${steps} steps` : "prompt";
+      chip(b, label, true, isSched ? `${desc} · scheduled` : desc);
+    }
+  }
+
+  // Commands
+  {
+    const b = card("Commands", ".claude/commands");
+    const cmds = mergeByName(await gatherFromVault(app, "commands"), await gatherFromScopes("commands"));
+    if (!cmds.length) empty(b, "None found.");
+    for (const cm of cmds) chip(b, `/${cm.name}`, true);
+  }
+
+  // Sub-agents
+  {
+    const b = card("Sub-agents", ".claude/agents");
+    const agents = mergeByName(await gatherFromVault(app, "agents"), await gatherFromScopes("agents"));
+    if (!agents.length) empty(b, "None found.");
+    for (const a of agents) chip(b, a.name, true, a.desc);
+  }
+
+  // Skills & Tools
+  tier("Skills & Tools");
+  // Skills
+  {
+    const b = card("Skills", ".claude/skills");
+    const skills = mergeByName(await gatherFromVault(app, "skills"), await gatherFromScopes("skills"));
+    if (!skills.length) empty(b, "None found.");
+    for (const sk of skills) chip(b, sk.name, true);
   }
 
   // Tools
@@ -197,40 +270,5 @@ export async function renderCapabilitiesPanel(
       empty(b, "No MCP servers active.");
     }
     if (s.fastStartup && external.length) b.createDiv({ cls: "mva-faint", text: "External MCP is off while Fast startup is on." });
-  }
-
-  // Sub-agents
-  {
-    const b = card("Sub-agents", ".claude/agents");
-    const agents = mergeByName(await gatherFromVault(app, "agents"), await gatherFromScopes("agents"));
-    if (!agents.length) empty(b, "None found.");
-    for (const a of agents) chip(b, a.name, true, a.desc);
-  }
-
-  // Skills
-  {
-    const b = card("Skills", ".claude/skills");
-    const skills = mergeByName(await gatherFromVault(app, "skills"), await gatherFromScopes("skills"));
-    if (!skills.length) empty(b, "None found.");
-    for (const sk of skills) chip(b, sk.name, true);
-  }
-
-  // Commands
-  {
-    const b = card("Commands", ".claude/commands");
-    const cmds = mergeByName(await gatherFromVault(app, "commands"), await gatherFromScopes("commands"));
-    if (!cmds.length) empty(b, "None found.");
-    for (const cm of cmds) chip(b, `/${cm.name}`, true);
-  }
-
-  // Memory
-  {
-    const b = card("Vault memory", "_system/");
-    chip(b, "Read at boot", s.memoryReadEnabled && claude);
-    chip(b, "Write (gated)", s.memoryWriteEnabled && claude);
-    const open = (p: string) => () => ctx.onOpenNote(p);
-    chip(b, "vault-context.md", true, "open", open("_system/vault-context.md"));
-    chip(b, "preferences.md", true, "open", open("_system/memory/preferences/preferences.md"));
-    chip(b, "session-log.md", true, "open", open("_system/memory/session-log.md"));
   }
 }
