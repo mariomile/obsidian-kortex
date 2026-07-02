@@ -130,9 +130,12 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-normal);
 }
 .mva-tab.is-active {
-  background: var(--background-primary);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
   color: var(--text-normal);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--background-modifier-border);
+}
+.mva-tab.is-active .mva-tab-title {
+  font-weight: 500;
 }
 .mva-tab-dot {
   width: 6px;
@@ -1351,6 +1354,10 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   border-color: var(--interactive-accent);
   background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
 }
+.mva-ask-opt:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
 /* Leading radio (single) / checkbox (multi) indicator drawn in CSS. */
 .mva-ask-ind {
   flex: 0 0 auto;
@@ -2306,7 +2313,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-working-hint {
   font-size: 10.5px;
   color: var(--text-faint);
-  margin-left: auto;
+  margin-left: 12px;
 }
 @keyframes mva-working-pulse {
   0%,
