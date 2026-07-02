@@ -116,22 +116,23 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   max-width: 170px;
   height: 28px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
   background: transparent;
   border: none;
   box-sizing: border-box;
-  transition: background var(--mva-t), color var(--mva-t);
+  transition: background var(--mva-t), color var(--mva-t), box-shadow var(--mva-t);
 }
 .mva-tab:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 .mva-tab.is-active {
-  background: var(--background-modifier-hover);
+  background: var(--background-primary);
   color: var(--text-normal);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--background-modifier-border);
 }
 .mva-tab-dot {
   width: 6px;
@@ -170,7 +171,7 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   justify-content: center;
   height: 28px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: 10px;
   color: var(--text-muted);
   background: transparent;
   cursor: pointer;
