@@ -67,8 +67,19 @@ class ClaudeSession implements AgentSession {
           : {}),
         ...(opts.autoCompact ? { autoCompactEnabled: true } : {}),
         ...(() => {
-          const sys = [opts.systemPrompt, opts.memoryPreamble].filter(Boolean).join("\n\n");
-          return sys ? { systemPrompt: sys } : {};
+          // Use Claude Code's OWN default system prompt (tool discipline,
+          // conciseness — which keeps token use down — plan/todo behavior, and a
+          // cache-friendly prefix) and APPEND Exo's memory + optional user prompt.
+          // Passing a bare string here would REPLACE CC's system prompt, turning the
+          // agent into a raw, more verbose Claude that behaves nothing like CC.
+          const append = [opts.systemPrompt, opts.memoryPreamble].filter(Boolean).join("\n\n");
+          return {
+            systemPrompt: {
+              type: "preset" as const,
+              preset: "claude_code" as const,
+              ...(append ? { append } : {}),
+            },
+          };
         })(),
         ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
         pathToClaudeCodeExecutable: opts.cli.bin,
