@@ -1549,6 +1549,7 @@ export class ChatView extends ItemView {
     const close = () => {
       open = false;
       pop.hide();
+      chip.removeClass("is-open"); // drop the "popover open" risk-color state
       document.removeEventListener("click", onDoc, true);
     };
     this.clickable(chip, (e) => {
@@ -1556,6 +1557,7 @@ export class ChatView extends ItemView {
       if (open) return close();
       buildPop(); // rebuild fresh — option lists can change (e.g. model list per provider)
       open = true;
+      chip.addClass("is-open"); // hold full risk color while the popover is up
       pop.show();
       document.addEventListener("click", onDoc, true);
     });

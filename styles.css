@@ -598,9 +598,31 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
-/* risk coloring (permission chip only) — text color, no chrome */
-.mva-sel-chip.is-caution { color: var(--color-orange, #e0a341); }
-.mva-sel-chip.is-danger  { color: var(--color-red, #e05b5b); }
+/* Risk coloring (permission chip only). At rest: a small colored dot signals the
+   risk level while the mode text stays quiet (muted) — no permanent alarm. The
+   full risk color only floods the text on hover or while the popover is open. */
+.mva-sel-chip.is-caution,
+.mva-sel-chip.is-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+}
+.mva-sel-chip.is-caution::before,
+.mva-sel-chip.is-danger::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mva-sel-chip.is-caution::before { background: var(--color-orange, #e0a341); }
+.mva-sel-chip.is-danger::before  { background: var(--color-red, #e05b5b); }
+/* Escalate to full risk color on hover / while the popover is open. */
+.mva-sel-chip.is-caution:hover,
+.mva-sel-chip.is-caution.is-open { color: var(--color-orange, #e0a341); }
+.mva-sel-chip.is-danger:hover,
+.mva-sel-chip.is-danger.is-open  { color: var(--color-red, #e05b5b); }
 
 .mva-sel-pop {
   position: absolute;
