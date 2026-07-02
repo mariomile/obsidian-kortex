@@ -2495,3 +2495,107 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   width: 13px;
   height: 13px;
 }
+
+/* ---------------------------- chat outline ---------------------------- */
+/* Notion-style navigator for the user's own messages. A quiet rail of ticks
+   at the right edge of the conversation wrap (position:relative context);
+   hovering the rail expands it into a floating panel of labelled rows. The
+   collapsed→expanded swap is pure CSS (opacity/max-width), gated by
+   prefers-reduced-motion. Sits below the jump-to-bottom pill (z 5) and inset
+   from the scrollbar so neither is blocked. */
+.mva-outline {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 8px 6px;
+  max-height: 70%;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--mva-r2);
+  background: transparent;
+  box-shadow: none;
+  /* Only the rail's own box is interactive — the rest of the edge stays free
+     for scrolling and the jump pill. */
+  pointer-events: auto;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.mva-outline:hover {
+  background: var(--background-secondary);
+  border-color: var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+}
+.mva-outline-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 16px;
+  padding: 1px 4px;
+  border-radius: var(--mva-r1);
+  cursor: pointer;
+}
+.mva-outline-tick {
+  flex-shrink: 0;
+  width: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--text-faint);
+  transition: width 150ms ease-out, opacity 150ms ease-out, background-color 150ms ease-out;
+}
+.mva-outline-item.is-active .mva-outline-tick {
+  width: 20px;
+  background: var(--text-normal);
+}
+.mva-outline-label {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+  transition: max-width 150ms ease-out, opacity 150ms ease-out;
+}
+/* Expanded (panel) state: ticks collapse away, labels reveal as rows. */
+.mva-outline:hover .mva-outline-tick {
+  width: 0;
+  opacity: 0;
+}
+.mva-outline:hover .mva-outline-label {
+  max-width: 240px;
+  opacity: 1;
+}
+.mva-outline:hover .mva-outline-item:hover {
+  background: var(--background-modifier-hover);
+}
+.mva-outline:hover .mva-outline-item:hover .mva-outline-label {
+  color: var(--text-normal);
+}
+.mva-outline:hover .mva-outline-item.is-active .mva-outline-label {
+  color: var(--text-accent);
+}
+/* Brief highlight when a turn is jumped to from the outline. */
+.mva-user.is-flash {
+  animation: mva-outline-flash 1s ease-out;
+}
+@keyframes mva-outline-flash {
+  from { background: var(--background-modifier-hover); }
+  to { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mva-outline,
+  .mva-outline-tick,
+  .mva-outline-label {
+    transition: none;
+  }
+  .mva-user.is-flash {
+    animation: none;
+  }
+}

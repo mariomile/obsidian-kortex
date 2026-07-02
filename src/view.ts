@@ -304,6 +304,10 @@ export class ChatView extends ItemView {
   private scrollRaf: number | null = null;
   /** Floating jump-to-bottom button (lazily created). */
   private jumpPill: HTMLElement | null = null;
+  /** Notion-style user-message navigator rail (per-view, rebuilt on changes). */
+  private outlineEl: HTMLElement | null = null;
+  /** Coalesces outline active-item updates into one rAF per scroll frame. */
+  private outlineRaf: number | null = null;
   /** Whether we've already lazily asked for OS notification permission (once). */
   private notifyPermAsked = false;
 
@@ -669,6 +673,7 @@ export class ChatView extends ItemView {
     this.renderTabs();
     this.scrollToBottom();
     this.renderTailSurfacing(this.active);
+    this.rebuildOutline();
   }
 
   private serialize(): ConvoData[] {
@@ -796,6 +801,7 @@ export class ChatView extends ItemView {
     this.persistTabs();
     this.scrollConvo(c);
     this.renderTailSurfacing(c);
+    this.rebuildOutline();
     this.prewarm();
   }
 
@@ -989,6 +995,7 @@ export class ChatView extends ItemView {
     this.galleryEl = null;
     this.listEl.show();
     this.composerEl.show();
+    this.rebuildOutline();
   }
 
   /* -------------------------- capabilities -------------------------- */
@@ -1002,6 +1009,7 @@ export class ChatView extends ItemView {
     this.capsEl?.remove();
     this.capsEl = null;
     this.listEl.show();
+    this.rebuildOutline();
   }
 
   private showCapabilities(): void {
@@ -1009,6 +1017,7 @@ export class ChatView extends ItemView {
     this.listEl.hide();
     const wrap = this.listWrap.createDiv({ cls: "mva-gallery-wrap" });
     this.capsEl = wrap;
+    this.rebuildOutline(); // drop the outline rail while capabilities is up
     void renderCapabilitiesPanel(wrap, this.app, this.plugin.settings, {
       provider: this.provider,
       model: this.model,
@@ -1026,6 +1035,7 @@ export class ChatView extends ItemView {
     this.composerEl.hide();
     const wrap = this.listWrap.createDiv({ cls: "mva-gallery-wrap" });
     this.galleryEl = wrap;
+    this.rebuildOutline(); // drop the outline rail while the gallery is up
     wrap.createDiv({ cls: "mva-gallery-title", text: "Conversations" });
 
     const sorted = [...this.convos]
@@ -2112,6 +2122,7 @@ export class ChatView extends ItemView {
     }
     if (text) void MarkdownRenderer.render(this.app, text, bubble.createDiv({ cls: "markdown-rendered" }), "", this);
     this.scrollConvo(c);
+    if (c === this.active) this.rebuildOutline();
   }
 
   private addAssistantTurn(c: Convo, userText: string): AssistantCtx {
@@ -2456,6 +2467,7 @@ export class ChatView extends ItemView {
     this.renderQueue(c);
     c.updatedAt = Date.now();
     this.updateUsage(null);
+    if (c === this.active) this.rebuildOutline();
     this.persist();
     new Notice("Rewound the conversation. Files are unchanged; the session was reset.");
   }
@@ -2543,6 +2555,7 @@ export class ChatView extends ItemView {
     this.renderQueue(c);
     c.updatedAt = Date.now();
     this.updateUsage(null);
+    if (c === this.active) this.rebuildOutline();
     this.persist();
     const note = `Rewound. Restored ${changed} file${changed === 1 ? "" : "s"}; session reset.`;
     new Notice(missingCheckpoints ? `${note} (some edits had no snapshot — e.g. oversized files are not checkpointed.)` : note);
@@ -3282,7 +3295,68 @@ export class ChatView extends ItemView {
       const el = c.listEl;
       this.pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
       this.updateJumpPill();
+      // Keep the outline's active tick in sync with the viewport (rAF-coalesced
+      // so a fast scroll fires at most one rect read per frame).
+      if (this.outlineRaf === null) {
+        this.outlineRaf = requestAnimationFrame(() => {
+          this.outlineRaf = null;
+          this.updateOutlineActive();
+        });
+      }
     });
+  }
+
+  /** Rebuild the Notion-style outline rail from the ACTIVE conversation's DOM.
+   *  Derived from `.mva-user` turns (always in sync with what's rendered). Shown
+   *  only with >=2 user messages and never over the gallery/capabilities panel.
+   *  Idempotent — safe to call on any lifecycle transition. */
+  private rebuildOutline(): void {
+    this.outlineEl?.remove();
+    this.outlineEl = null;
+    if (this.galleryEl || this.capsEl) return; // hidden behind full-pane overlays
+    const turns = Array.from(this.listEl.querySelectorAll<HTMLElement>(".mva-user"));
+    if (turns.length < 2) return; // no rail for a single-message conversation
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const rail = this.listWrap.createDiv({ cls: "mva-outline" });
+    for (const turn of turns) {
+      const item = rail.createDiv({ cls: "mva-outline-item" });
+      item.createDiv({ cls: "mva-outline-tick" });
+      const raw = (turn.textContent || "").replace(/\s+/g, " ").trim();
+      const label = raw.length > 42 ? raw.slice(0, 41).trimEnd() + "…" : raw || "(empty message)";
+      item.createDiv({ cls: "mva-outline-label", text: label });
+      item.setAttribute("aria-label", `Jump to message: ${label}`);
+      this.clickable(item, () => this.jumpToTurn(turn, reduce));
+    }
+    this.outlineEl = rail;
+    this.updateOutlineActive();
+  }
+
+  /** Mark the outline item whose user turn is nearest the top of the viewport. */
+  private updateOutlineActive(): void {
+    const rail = this.outlineEl;
+    if (!rail) return;
+    const turns = Array.from(this.listEl.querySelectorAll<HTMLElement>(".mva-user"));
+    const items = Array.from(rail.children) as HTMLElement[];
+    if (turns.length !== items.length) return; // out of sync — a rebuild will fix it
+    const refTop = this.listEl.getBoundingClientRect().top;
+    let activeIdx = 0;
+    for (let i = 0; i < turns.length; i++) {
+      // Last turn whose top edge is at or above the viewport top (+ small slack).
+      if (turns[i].getBoundingClientRect().top - refTop <= 8) activeIdx = i;
+      else break;
+    }
+    items.forEach((it, i) => it.toggleClass("is-active", i === activeIdx));
+  }
+
+  /** Smooth-scroll a user turn to near the top and flash it briefly. Instant
+   *  scroll + no motion when reduced-motion is requested. */
+  private jumpToTurn(turn: HTMLElement, reduce: boolean): void {
+    turn.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    turn.removeClass("is-flash");
+    void turn.offsetWidth; // restart the fade if the same turn is clicked twice
+    turn.addClass("is-flash");
+    window.setTimeout(() => turn.removeClass("is-flash"), 1000);
   }
 
   /** Show/hide the floating jump-to-bottom pill based on pin state. */
