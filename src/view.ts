@@ -76,7 +76,8 @@ export interface AskQuestion {
 type Segment =
   | { t: "text"; md: string }
   | { t: "tool"; name: string; input: unknown; ok: boolean | null; output: string }
-  | { t: "ask"; questions: AskQuestion[]; answers: Record<string, string> };
+  | { t: "ask"; questions: AskQuestion[]; answers: Record<string, string> }
+  | { t: "artifact"; path: string };
 /** Per-turn file snapshot for code rewind: path → content before the turn (null = didn't exist). */
 type Checkpoint = Map<string, string | null>;
 type Message =
@@ -157,6 +158,10 @@ interface AssistantCtx {
   writeById: Map<string, string>;
   /** Notes already revealed this turn (dedupe). */
   revealed: Set<string>;
+  /** Vault-relative paths that got a preview card this turn (dedupe, first write wins). */
+  artifacts: Set<string>;
+  /** Vault-relative paths that did NOT exist when first written this turn (newly created). */
+  createdPaths: Set<string>;
   convo: Convo;
   /** Per-turn debounce timer, so parallel conversations don't fight over a shared one. */
   renderTimer: number | null;
@@ -1124,7 +1129,9 @@ export class ChatView extends ItemView {
                   ? seg.md
                   : seg.t === "ask"
                     ? "↳ asked: " + seg.questions.map((q) => q.header).join(", ")
-                    : `↳ ${toolMeta(seg.name, seg.input).label}`
+                    : seg.t === "artifact"
+                      ? "🖼 " + noteBasename(seg.path)
+                      : `↳ ${toolMeta(seg.name, seg.input).label}`
               )
               .join(" ");
       s += part.replace(/[#*`>_~]/g, "").replace(/\s+/g, " ").trim() + "  ";
@@ -1862,6 +1869,8 @@ export class ChatView extends ItemView {
           } else if (s.t === "ask") {
             const card = body.createDiv({ cls: "mva-ask" });
             this.renderAskSummary(card, s.questions, s.answers);
+          } else if (s.t === "artifact") {
+            this.buildArtifactCard(body, s.path);
           } else {
             const refs = this.createToolCard(body, s.name, s.input);
             this.finishToolCard(refs, s.ok !== false, s.output);
@@ -1930,6 +1939,8 @@ export class ChatView extends ItemView {
       touched: [],
       writeById: new Map(),
       revealed: new Set(),
+      artifacts: new Set(),
+      createdPaths: new Set(),
       convo: c,
       renderTimer: null,
       todosEl: null,
@@ -2404,6 +2415,81 @@ export class ChatView extends ItemView {
       return;
     }
     void this.app.workspace.openLinkText(rel, "", "tab");
+  }
+
+  /** Persist + render a live preview card for a generated file (vault-relative path). */
+  private renderArtifactCard(ctx: AssistantCtx, path: string): void {
+    ctx.segments.push({ t: "artifact", path });
+    this.buildArtifactCard(ctx.bodyEl, path);
+  }
+
+  /** Render a preview card for a generated file. HTML → sandboxed iframe preview;
+   *  markdown → a capped, faded MarkdownRenderer preview. Resolves the resource /
+   *  file fresh so restored transcripts reflect the current on-disk state. */
+  private buildArtifactCard(parent: HTMLElement, path: string): void {
+    const lower = path.toLowerCase();
+    const isHtml = lower.endsWith(".html") || lower.endsWith(".htm");
+    const file = this.app.vault.getAbstractFileByPath(path);
+    const exists = file instanceof TFile;
+
+    const card = parent.createDiv({ cls: "mva-artifact" });
+    const head = card.createDiv({ cls: "mva-artifact-head" });
+    setIcon(head.createSpan({ cls: "mva-artifact-ico" }), isHtml ? "file-code-2" : "file-text");
+    head.createSpan({ cls: "mva-artifact-name", text: noteBasename(path) });
+    head.createDiv({ cls: "mva-artifact-spacer" });
+    const openAction = () => (isHtml ? this.openArtifactExternally(path) : this.revealNote(path));
+    const openBtn = head.createSpan({ cls: "mva-artifact-open", attr: { "aria-label": "Open" } });
+    setIcon(openBtn, "external-link");
+    openBtn.onclick = (e) => {
+      e.stopPropagation();
+      openAction();
+    };
+
+    // File gone (deleted since the card was created, or an out-of-vault HTML path):
+    // markdown shows an explicit note; HTML falls back to a header-only card.
+    if (!exists) {
+      if (!isHtml) card.createDiv({ cls: "mva-artifact-missing", text: "File deleted" });
+      return;
+    }
+
+    if (isHtml) {
+      const frame = card.createDiv({ cls: "mva-artifact-frame" });
+      const iframe = frame.createEl("iframe");
+      iframe.setAttr("sandbox", "allow-scripts"); // no allow-same-origin: isolated from the app
+      iframe.src = this.app.vault.getResourcePath(file);
+      frame.onclick = (e) => {
+        e.stopPropagation();
+        openAction();
+      };
+    } else {
+      const frame = card.createDiv({ cls: "mva-artifact-frame is-md" });
+      const body = frame.createDiv({ cls: "mva-artifact-md markdown-rendered" });
+      void this.app.vault
+        .cachedRead(file)
+        .then((content) => MarkdownRenderer.render(this.app, content.slice(0, 3000), body, path, this))
+        .catch(() => {});
+      frame.createDiv({ cls: "mva-artifact-fade" });
+      frame.onclick = (e) => {
+        e.stopPropagation();
+        openAction();
+      };
+    }
+  }
+
+  /** Open an HTML artifact in the system browser. In-vault → its app:// resource
+   *  URL; outside the vault → the OS shell on the absolute path. */
+  private openArtifactExternally(path: string): void {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      window.open(this.app.vault.getResourcePath(file));
+      return;
+    }
+    try {
+      const electron = require("electron") as { shell: { openPath(p: string): Promise<string> } };
+      void electron.shell.openPath(path);
+    } catch {
+      new Notice("Couldn't open the artifact.");
+    }
   }
 
   /* ------------------------------ tools ----------------------------- */
@@ -3087,7 +3173,13 @@ export class ChatView extends ItemView {
             const kind = ChatView.WRITE_TOOLS.test(e.name) ? "write" : "read";
             if (kind === "read") ctx.sources.add(fp);
             else snapshots.push(this.snapshot(checkpoint, fp).catch(() => {})); // checkpoint before the write runs
-            if (kind === "write") ctx.writeById.set(e.id, fp);
+            if (kind === "write") {
+              ctx.writeById.set(e.id, fp);
+              // A file that doesn't exist yet at write-start is newly created this turn
+              // (drives markdown preview cards; edits of existing notes don't get one).
+              const rel = this.relPath(fp);
+              if (!this.app.vault.getAbstractFileByPath(rel)) ctx.createdPaths.add(rel);
+            }
             mergeTouched(ctx.touched, fp, kind);
           }
           // Feature 4: a subagent's tool call nests under its parent Task card
@@ -3117,6 +3209,18 @@ export class ChatView extends ItemView {
           if (e.ok && wp && this.plugin.settings.revealEditedNotes && !ctx.revealed.has(wp)) {
             ctx.revealed.add(wp);
             this.revealNote(wp);
+          }
+          // Live preview card: HTML artifacts (any write) + newly-created markdown
+          // notes. Dedup per turn on the first successful write of that path.
+          if (e.ok && wp) {
+            const rel = this.relPath(wp);
+            const lower = rel.toLowerCase();
+            const isHtml = lower.endsWith(".html") || lower.endsWith(".htm");
+            const isNewMd = lower.endsWith(".md") && ctx.createdPaths.has(rel);
+            if ((isHtml || isNewMd) && !ctx.artifacts.has(rel)) {
+              ctx.artifacts.add(rel);
+              this.renderArtifactCard(ctx, rel);
+            }
           }
           break;
         }
