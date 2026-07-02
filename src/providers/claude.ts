@@ -18,21 +18,6 @@ const ALL_TOOLS = [
 ];
 
 /**
- * Thrown by send() when the session booted without the in-process Obsidian MCP
- * tools: the SDK's `alwaysLoad` blocks startup only up to a fixed 5s connect
- * cap — slow session startup (e.g. SessionStart hooks) trips it, the turn-1
- * prompt is built without the tools, and the WHOLE session runs degraded.
- * Guaranteed to be thrown before anything user-visible happens (no events
- * emitted, no message queued), so the caller can respawn and retry invisibly.
- */
-export class DegradedSessionError extends Error {
-  constructor() {
-    super("Session booted without the Obsidian MCP tools (connect timeout).");
-    this.name = "DegradedSession";
-  }
-}
-
-/**
  * A persistent Claude conversation: one long-lived SDK `query()` driven in
  * streaming-input mode. Follow-up turns push into the same input stream, so the
  * CLI process and context stay warm — no per-message cold start.
@@ -59,24 +44,9 @@ class ClaudeSession implements AgentSession {
   /** Per-turn tail of CLI stderr lines, surfaced when a turn ends in an error whose
    *  `result` is empty (e.g. error_during_execution). Cleared at the start of send(). */
   private stderrTail: string[] = [];
-  /** Resolved when the CLI reports session init (system/init message) — the point
-   *  at which in-process MCP tools are registered. The first send awaits this so
-   *  turn 1 never races the MCP handshake (which would run without mcp__obsidian__
-   *  tools). A 10s fallback guarantees a missing init can never deadlock a send. */
-  private ready: Promise<void>;
-  private markReady!: () => void;
-  /** Whether this session was configured with the in-process Obsidian server. */
-  private expectObsidian: boolean;
-  /** Set from the init message's tools list: the expected mcp__obsidian__ tools
-   *  are missing (the SDK's 5s MCP connect cap tripped during a slow startup).
-   *  The degradation is session-lifetime — only a respawn fixes it. */
-  private mcpDegraded = false;
 
   constructor(opts: SessionOpts) {
     this.sessionId = opts.resumeSessionId;
-    this.expectObsidian = !!opts.obsidianServer;
-    this.ready = new Promise<void>((r) => (this.markReady = r));
-    setTimeout(() => this.markReady(), 10_000);
     const self = this;
     async function* input(): AsyncGenerator<{
       type: "user";
@@ -216,22 +186,11 @@ class ClaudeSession implements AgentSession {
       this.settleTurn(err instanceof Error ? err : new Error(m));
     } finally {
       this.ended = true;
-      this.markReady(); // never leave a first send parked on init for a dead session
     }
   }
 
   private route(msg: ClaudeMsg): void {
     if (msg.session_id) this.sessionId = msg.session_id;
-    // Session init: MCP servers are handshaken and tools registered. Must run
-    // BEFORE the emit guard — with pre-warm, init arrives while no turn (and no
-    // onEvent) is attached yet. The init tools list also tells us whether the
-    // obsidian server made the SDK's 5s connect cap; if not, the session runs
-    // degraded for its whole lifetime and the first send will ask for a respawn.
-    if (msg.type === "system" && msg.subtype === "init") {
-      this.mcpDegraded =
-        this.expectObsidian && !(msg.tools ?? []).some((t) => t.startsWith("mcp__obsidian__"));
-      this.markReady();
-    }
     const emit = this.onEvent;
     if (!emit) return;
 
@@ -303,8 +262,7 @@ class ClaudeSession implements AgentSession {
   send(
     message: string,
     onEvent: (e: AgentEvent) => void,
-    images?: import("./types").ImageAttachment[],
-    opts?: { acceptDegraded?: boolean }
+    images?: import("./types").ImageAttachment[]
   ): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Session disposed."));
     // A dead stream can never answer: fail fast so the view drops this session
@@ -327,31 +285,12 @@ class ClaudeSession implements AgentSession {
           ]
         : message;
     return new Promise<void>((resolve, reject) => {
-      // Turn handles are claimed synchronously (keeps the overlapping-turn guard
-      // race-free); only the actual push waits for session init. Warm sessions
-      // resolve `ready` immediately, so this adds zero latency to later turns.
       this.resolveTurn = resolve;
       this.rejectTurn = reject;
-      void this.ready.then(() => {
-        // Disposed while waiting: settleTurn already rejected this promise.
-        if (this.disposed) return;
-        // Degraded boot (MCP tools missing from the turn-1 prompt): refuse HERE,
-        // before anything user-visible — no events have been emitted and nothing
-        // is queued yet — so the caller can respawn + retry invisibly. settleTurn
-        // both clears the just-claimed handles and rejects this promise, leaving
-        // zero dangling turn state on this session.
-        if (this.mcpDegraded && !opts?.acceptDegraded) {
-          this.settleTurn(new DegradedSessionError());
-          return;
-        }
-        if (this.mcpDegraded) {
-          console.warn("[exo] obsidian tools missing from session (mcp connect timeout)");
-        }
-        this.queue.push({ role: "user", content });
-        const w = this.wake;
-        this.wake = null;
-        w?.();
-      });
+      this.queue.push({ role: "user", content });
+      const w = this.wake;
+      this.wake = null;
+      w?.();
     });
   }
 
@@ -398,7 +337,6 @@ class ClaudeSession implements AgentSession {
   dispose(): void {
     if (this.disposed) return; // idempotent — dispose may be called more than once
     this.disposed = true;
-    this.markReady(); // release any send() parked on session init
     this.denyPending?.();
     try {
       this.wake?.();
@@ -470,8 +408,6 @@ interface ClaudeMsg {
   parent_tool_use_id?: string | null;
   result?: string;
   compact_summary?: string;
-  /** system/init only: tool names available to this session. */
-  tools?: string[];
   event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
   message?: {
     content?: Array<{

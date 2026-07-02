@@ -88,16 +88,8 @@ export interface SessionOpts {
  * (no per-message cold start). For Codex it spawns `codex exec` per turn.
  */
 export interface AgentSession {
-  /** Send one user turn; resolves when that turn completes.
-   *  `opts.acceptDegraded` (Claude): proceed even if the session booted without
-   *  the in-process MCP tools — used on the second attempt of the self-healing
-   *  respawn so a degraded boot can never block the user. */
-  send(
-    message: string,
-    onEvent: (e: AgentEvent) => void,
-    images?: ImageAttachment[],
-    opts?: { acceptDegraded?: boolean }
-  ): Promise<void>;
+  /** Send one user turn; resolves when that turn completes. */
+  send(message: string, onEvent: (e: AgentEvent) => void, images?: ImageAttachment[]): Promise<void>;
   /** Interrupt the in-flight turn. */
   interrupt(): void;
   /** Compact the conversation context (best-effort; Claude supports /compact). */

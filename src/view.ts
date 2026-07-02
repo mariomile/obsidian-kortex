@@ -201,9 +201,6 @@ export class ChatView extends ItemView {
   private get streaming(): boolean {
     return this.active?.streaming ?? false;
   }
-  private obsidianServer: unknown = null;
-  private obsidianAlwaysLoad = true;
-  private obsidianMemoryWrite = true;
   private memoryPreamble = "";
   /** In-flight session spawns, so a pre-warm and a real send don't double-spawn
    *  (and leak) a CLI session for the same conversation. */
@@ -351,25 +348,16 @@ export class ChatView extends ItemView {
 
     // Obsidian-native tools are Claude-only and require agentic (gated) mode.
     const useObsidian = s.obsidianToolsEnabled && s.toolsEnabled && c.provider === "claude";
-    // Rebuild the server if the always-load (context-saving) preference or the
-    // memory-write toggle changed — memory-write tools are only registered when on.
-    const wantAlwaysLoad = !s.contextSavingMode;
-    const wantMemoryWrite = s.memoryWriteEnabled;
-    if (
-      useObsidian &&
-      (!this.obsidianServer ||
-        this.obsidianAlwaysLoad !== wantAlwaysLoad ||
-        this.obsidianMemoryWrite !== wantMemoryWrite)
-    ) {
-      this.obsidianServer = createObsidianToolServer(
-        this.app,
-        wantAlwaysLoad,
-        wantMemoryWrite,
-        (qs) => this.askBridge(qs)
-      );
-      this.obsidianAlwaysLoad = wantAlwaysLoad;
-      this.obsidianMemoryWrite = wantMemoryWrite;
-    }
+    // The createSdkMcpServer instance binds to its first session's transport and
+    // is NOT reusable across query() sessions — a cached instance means every
+    // session after the first (new tabs, post-error respawns) boots without the
+    // obsidian tools. Build a FRESH server per spawn; it's cheap (plain object +
+    // zod schemas), and the settings it depends on are read at creation time.
+    const obsidianServer = useObsidian
+      ? createObsidianToolServer(this.app, !s.contextSavingMode, s.memoryWriteEnabled, (qs) =>
+          this.askBridge(qs)
+        )
+      : undefined;
 
     let memoryPreamble: string | undefined;
     if (s.memoryReadEnabled && c.provider === "claude") {
@@ -388,7 +376,7 @@ export class ChatView extends ItemView {
       fastStartup: s.fastStartup,
       runHooks: s.runHooks,
       resumeSessionId: c.sessionId,
-      obsidianServer: useObsidian ? this.obsidianServer : undefined,
+      obsidianServer,
       nativeFirst: useObsidian && s.nativeFirst,
       memoryPreamble,
       autoCompact: s.autoCompactEnabled && c.provider === "claude",
@@ -3036,26 +3024,8 @@ export class ChatView extends ItemView {
 
     try {
       bump();
-      let session = await this.ensureSession(c);
-      try {
-        await session.send(message, onEvent, imgs);
-      } catch (err) {
-        if ((err as Error | null)?.name !== "DegradedSession") throw err;
-        // The session booted without the Obsidian MCP tools (the SDK loads
-        // always-load MCP tools into the turn-1 prompt only if the server
-        // connects within a fixed 5s cap; slow startup — e.g. SessionStart
-        // hooks — trips it). Nothing user-visible ran, so respawn once and
-        // retry invisibly: the CLI is warm now and usually connects in time.
-        // Degraded ≠ poisoned: our message never reached the session (the throw
-        // fires before the queue push), so the CLI-side transcript is intact —
-        // KEEP c.sessionId and let the respawn resume it (dropSession disposes
-        // the process but never clears the resume id).
-        // acceptDegraded on the retry: if it's STILL degraded, proceed anyway
-        // (built-in tools work; the session warns) — never block the user.
-        this.dropSession(c);
-        session = await this.ensureSession(c);
-        await session.send(message, onEvent, imgs, { acceptDegraded: true });
-      }
+      const session = await this.ensureSession(c);
+      await session.send(message, onEvent, imgs);
       // Stop the watchdog before reading `timedOut` so a timer that fires in the
       // gap between send() resolving and `finally` can't trip a false timeout.
       if (watchdog !== null) {
