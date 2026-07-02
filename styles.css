@@ -2317,3 +2317,10 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
     opacity: 1;
   }
 }
+
+/* ---------------------- turn duration (F2) ---------------------------- */
+.mva-turn-duration {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: auto;
+}

@@ -3392,7 +3392,15 @@ export class ChatView extends ItemView {
         this.renderError(ctx, `No response — timed out after ${IDLE_TIMEOUT / 1000}s.`);
       }
       this.attachTouched(ctx.el, ctx.touched, checkpoint);
-      if (ctx.fullText.trim()) this.attachActions(ctx.el, ctx.fullText, text, c);
+      if (ctx.fullText.trim()) {
+        this.attachActions(ctx.el, ctx.fullText, text, c);
+        // Turn duration (Feature 2): live-only, only when it's worth showing.
+        const elapsed = Date.now() - turnStart;
+        if (elapsed > 5000) {
+          const bar = ctx.el.querySelector(".mva-actions") as HTMLElement | null;
+          bar?.createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
+        }
+      }
     } catch (err) {
       this.flushRender(ctx);
       this.dropSession(c); // a failed turn likely poisoned the session
