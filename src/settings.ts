@@ -47,6 +47,8 @@ export interface MVASettings {
   featureWikilinkify: boolean;
   /** Open notes the agent edits in a tab beside the chat, live. */
   revealEditedNotes: boolean;
+  /** OS notifications when a turn finishes / waits / errors while Obsidian is backgrounded. */
+  systemNotifications: boolean;
   /** Set once after seeding example custom prompts, so we never re-seed. */
   seededPrompts: boolean;
   // Tab bar runtime state (not user-facing settings).
@@ -93,6 +95,7 @@ export const DEFAULT_SETTINGS: MVASettings = {
   featureSurfacing: true,
   featureWikilinkify: true,
   revealEditedNotes: true,
+  systemNotifications: true,
   seededPrompts: false,
   openTabIds: [],
   activeTabId: "",
@@ -438,6 +441,11 @@ export class MVASettingTab extends PluginSettingTab {
       "Reveal edited notes",
       "When the agent edits or creates a note, open it in a tab beside the chat so you watch it update live.",
       "revealEditedNotes"
+    );
+    toggle(
+      "System notifications",
+      "Notify when a turn finishes, a question/permission card is waiting, or an error occurs — only while Obsidian is in the background.",
+      "systemNotifications"
     );
 
     new Setting(containerEl)

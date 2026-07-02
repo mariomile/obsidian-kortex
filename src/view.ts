@@ -178,6 +178,8 @@ interface AssistantCtx {
   workingEl: HTMLElement | null;
   workingLabel: HTMLElement | null;
   workingElapsed: HTMLElement | null;
+  /** System-notification dedupe keys fired this turn (Feature 3): "done" | "waiting" | "error". */
+  notified: Set<string>;
 }
 
 /** Abort a turn if no event arrives for this long (avoids infinite loading). */
@@ -283,6 +285,8 @@ export class ChatView extends ItemView {
   private scrollRaf: number | null = null;
   /** Floating jump-to-bottom button (lazily created). */
   private jumpPill: HTMLElement | null = null;
+  /** Whether we've already lazily asked for OS notification permission (once). */
+  private notifyPermAsked = false;
 
   constructor(leaf: WorkspaceLeaf, private plugin: ExoPlugin) {
     super(leaf);
@@ -1955,6 +1959,7 @@ export class ChatView extends ItemView {
       workingEl: null,
       workingLabel: null,
       workingElapsed: null,
+      notified: new Set(),
     };
     this.scrollConvo(c);
     return ctx;
@@ -2021,6 +2026,40 @@ export class ChatView extends ItemView {
     const s = Math.max(0, Math.floor(ms / 1000));
     if (s < 60) return `${s}s`;
     return `${Math.floor(s / 60)}m ${s % 60}s`;
+  }
+
+  /* ------------------------ system notifications -------------------- */
+
+  /** OS notification while Obsidian is backgrounded (Feature 3). No-op if the
+   *  setting is off or the window is focused. Lazily requests permission once. */
+  private notify(title: string, body: string): void {
+    if (!this.plugin.settings.systemNotifications) return;
+    if (document.hasFocus()) return;
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "denied") return;
+    if (Notification.permission === "default") {
+      if (!this.notifyPermAsked) {
+        this.notifyPermAsked = true;
+        void Notification.requestPermission();
+      }
+      return; // permission resolves async — the next trigger fires
+    }
+    try {
+      const n = new Notification(title, { body, silent: false });
+      n.onclick = () => {
+        window.focus();
+        this.app.workspace.revealLeaf(this.leaf);
+      };
+    } catch {
+      /* ignore — notifications unavailable */
+    }
+  }
+
+  /** Fire a notification at most once per turn per type (`done`/`waiting`/`error`). */
+  private notifyOnce(ctx: AssistantCtx, type: string, title: string, body: string): void {
+    if (ctx.notified.has(type)) return;
+    ctx.notified.add(type);
+    this.notify(title, body);
   }
 
   private appendText(ctx: AssistantCtx, text: string): void {
@@ -2837,6 +2876,7 @@ export class ChatView extends ItemView {
     this.dropThinking(ctx);
     this.resetTextStream(ctx);
     this.hideWorking(ctx); // the ask card is the feedback while it waits
+    this.notifyOnce(ctx, "waiting", "Exo — waiting for you", "The agent asked a question / needs permission.");
     const card = ctx.bodyEl.createDiv({ cls: "mva-ask" });
     const answers: Record<string, string> = {};
     const seg: Segment = { t: "ask", questions, answers };
@@ -3332,6 +3372,12 @@ export class ChatView extends ItemView {
             // An open permission card also suspends the watchdog while the user decides.
             suspendWatchdog();
             this.hideWorking(ctx); // the card waiting for the user is the feedback
+            this.notifyOnce(
+              ctx,
+              "waiting",
+              "Exo — waiting for you",
+              "The agent asked a question / needs permission."
+            );
             this.addPermissionCard(ctx, c, e.tool, e.input, (d) => {
               resumeWatchdog();
               this.ensureWorking(ctx); // the turn continues once resolved
@@ -3371,6 +3417,7 @@ export class ChatView extends ItemView {
             poisoned = true;
             this.renderError(ctx, e.message);
             ctx.bodyEl.createSpan({ cls: "mva-faint", text: "The next message starts a fresh session." });
+            this.notifyOnce(ctx, "error", "Exo — error", e.message.slice(0, 80));
           }
           break;
       }
@@ -3401,6 +3448,12 @@ export class ChatView extends ItemView {
           bar?.createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
         }
       }
+      // Turn finished normally (Feature 3): notify if it ran long and the window
+      // is backgrounded. `poisoned` covers an in-band error already handled above.
+      if (!c.stopped && !poisoned && Date.now() - turnStart > 10000) {
+        const preview = ctx.fullText.trim().slice(0, 80) || "The agent finished working.";
+        this.notifyOnce(ctx, "done", "Exo — turn finished", preview);
+      }
     } catch (err) {
       this.flushRender(ctx);
       this.dropSession(c); // a failed turn likely poisoned the session
@@ -3414,6 +3467,7 @@ export class ChatView extends ItemView {
         const msg = describeError(err, adapter.displayName);
         if (!ctx.bodyEl.querySelector(".mva-inline-error, .mva-onboard")) this.renderError(ctx, msg);
         new Notice(msg);
+        this.notifyOnce(ctx, "error", "Exo — error", msg.slice(0, 80));
         // Don't replay queued messages into a broken session — they'd just re-fail.
         if (c.queue.length) {
           c.queue = [];
