@@ -96,8 +96,10 @@ export interface AgentSession {
   send(message: string, onEvent: (e: AgentEvent) => void, images?: ImageAttachment[]): Promise<void>;
   /** Interrupt the in-flight turn. */
   interrupt(): void;
-  /** Compact the conversation context (best-effort; Claude supports /compact). */
-  compact?(): void;
+  /** Compact the conversation context (best-effort; Claude supports /compact).
+   *  Optional free-text `instructions` steer what the compaction summary keeps
+   *  (appended to the /compact slash command). */
+  compact?(instructions?: string): void;
   /** Change the permission mode live (Claude); used by the plan-mode toggle. */
   setPermissionMode?(mode: PermissionMode): void;
   /** Tear down the session (kills any live process). */

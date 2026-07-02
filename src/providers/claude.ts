@@ -305,10 +305,20 @@ class ClaudeSession implements AgentSession {
     }
   }
 
-  /** Trigger conversation compaction via the CLI's /compact command. */
-  compact(): void {
+  /** Trigger conversation compaction via the CLI's /compact command, optionally
+   *  steered by free-text instructions.
+   *
+   *  The Agent SDK exposes NO dedicated compaction method: the `Query` interface
+   *  (sdk.d.ts) offers interrupt / setModel / setPermissionMode / setMcpPermission…
+   *  / getContextUsage etc., but nothing for compaction. `/compact` is a *local
+   *  slash command* the CLI intercepts, so the supported form is to push it as a
+   *  user message on the streaming-input queue — with any instructions appended
+   *  as `/compact <instructions>` (the same shape the interactive CLI accepts). */
+  compact(instructions?: string): void {
     if (this.disposed) return;
-    this.queue.push({ role: "user", content: "/compact" });
+    const trimmed = instructions?.trim();
+    const content = trimmed ? `/compact ${trimmed}` : "/compact";
+    this.queue.push({ role: "user", content });
     const w = this.wake;
     this.wake = null;
     w?.();

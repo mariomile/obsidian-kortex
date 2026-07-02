@@ -125,6 +125,9 @@ interface Convo {
   /** The discreet "Related" section appended below the last turn when the
    *  transcript doesn't fill the viewport (null when not shown). */
   tailSurfaceEl: HTMLElement | null;
+  /** True once the proactive ≥75% compaction nudge has been shown for this
+   *  conversation — one-shot, so it never re-appears after dismiss or compaction. */
+  compactNudged?: boolean;
 }
 
 interface AssistantCtx {
@@ -273,6 +276,8 @@ export class ChatView extends ItemView {
   private tabsEl!: HTMLElement;
   private listWrap!: HTMLElement;
   private composerEl!: HTMLElement;
+  /** One-shot "context is filling up" row under the composer (null when hidden). */
+  private compactNudgeEl: HTMLElement | null = null;
   private galleryEl: HTMLElement | null = null;
   private capsEl: HTMLElement | null = null;
   private inputEl!: HTMLTextAreaElement;
@@ -624,6 +629,7 @@ export class ChatView extends ItemView {
         pendingEl: null,
         currentCtx: null,
         tailSurfaceEl: null,
+        compactNudged: false,
       };
       if (wantDom.has(c.id)) this.renderConvoDom(c);
       this.wireScroll(c);
@@ -736,6 +742,7 @@ export class ChatView extends ItemView {
       pendingEl: null,
       currentCtx: null,
       tailSurfaceEl: null,
+      compactNudged: false,
     };
     this.wireScroll(c);
     return c;
@@ -933,8 +940,9 @@ export class ChatView extends ItemView {
     this.togglePlanMode();
   }
 
-  /** Manually compact the active conversation's context (Claude). */
-  private compactActive(): void {
+  /** Manually compact the active conversation's context (Claude), optionally
+   *  steered by free-text `instructions` (from the /compact slash command). */
+  private compactActive(instructions?: string): void {
     const c = this.active;
     if (c.provider !== "claude") {
       new Notice("Compact is available for Claude.");
@@ -948,8 +956,11 @@ export class ChatView extends ItemView {
       new Notice("Send a message first — nothing to compact yet.");
       return;
     }
-    c.session.compact();
-    new Notice("Compacting the conversation…");
+    c.session.compact(instructions);
+    // Any compaction retires the proactive nudge for good.
+    c.compactNudged = true;
+    this.hideCompactNudge();
+    new Notice(instructions ? "Compacting with your instructions…" : "Compacting the conversation…");
   }
 
   /** Reflect the active conversation's streaming state on the send button. */
@@ -1385,6 +1396,10 @@ export class ChatView extends ItemView {
   private async slashItems(query: string): Promise<AcItem[]> {
     const q = query.toLowerCase();
     const out: AcItem[] = [];
+    // Built-in: /compact [instructions] — compaction, handled locally in send().
+    if ("compact".includes(q)) {
+      out.push({ label: "compact", detail: "compact context", icon: "scissors", insert: "/compact " });
+    }
     for (const p of this.plugin.settings.customPrompts) {
       if (p.name.toLowerCase().includes(q)) {
         const isWorkflow = p.prompt.includes(" >>> ");
@@ -1634,6 +1649,7 @@ export class ChatView extends ItemView {
       if (this.usageFillEl) this.usageFillEl.style.transform = "scaleX(0)";
       this.usagePctEl?.setText("");
       this.usageCostEl?.setText("");
+      this.hideCompactNudge();
       return;
     }
 
@@ -1645,6 +1661,11 @@ export class ChatView extends ItemView {
     const risk: RiskLevel = pct >= 90 ? "is-danger" : pct >= 75 ? "is-caution" : "";
     if (risk) this.usageEl.addClass(risk);
 
+    // Proactive one-shot nudge: once context crosses 75% (same threshold as the
+    // bar's caution state), suggest compacting. Shown at most once per convo.
+    if (pct >= 75) this.maybeShowCompactNudge();
+    else this.hideCompactNudge();
+
     // Codex never emits usage events (no cost field either) — Claude sessions
     // omit costUsd when the experimental SDK cost API is unavailable. Either
     // way: no cost data means no cost text, never a broken/placeholder UI.
@@ -1653,6 +1674,41 @@ export class ChatView extends ItemView {
     } else {
       this.usageCostEl?.setText("");
     }
+  }
+
+  /** Show the discreet ≥75% compaction nudge under the composer — one-shot per
+   *  conversation, Claude-only (compaction is a Claude capability). Marks the
+   *  convo as nudged before rendering so it never re-appears. */
+  private maybeShowCompactNudge(): void {
+    const c = this.active;
+    if (c.provider !== "claude") return; // compaction is Claude-only
+    if (c.compactNudged) return; // one-shot per conversation
+    if (!c.session?.compact) return; // nothing to compact yet
+    if (this.compactNudgeEl) return; // already visible
+    c.compactNudged = true;
+
+    const row = this.composerEl.createDiv({ cls: "mva-compact-nudge" });
+    setIcon(row.createSpan({ cls: "mva-compact-nudge-icon" }), "scissors");
+    row.createSpan({
+      cls: "mva-compact-nudge-text",
+      text: "Context is filling up — compacting keeps the conversation sharp.",
+    });
+    const act = row.createEl("button", { cls: "mva-compact-nudge-act", text: "Compact now" });
+    act.onclick = () => {
+      this.hideCompactNudge();
+      this.compactActive(); // no instructions — quick one-click compaction
+    };
+    const x = row.createSpan({ cls: "mva-compact-nudge-x", attr: { "aria-label": "Dismiss" } });
+    setIcon(x, "x");
+    x.onclick = () => this.hideCompactNudge();
+    this.compactNudgeEl = row;
+  }
+
+  /** Remove the nudge row (visual only — the per-convo `compactNudged` flag
+   *  persists, so the one-shot is never re-triggered). */
+  private hideCompactNudge(): void {
+    this.compactNudgeEl?.remove();
+    this.compactNudgeEl = null;
   }
 
 
@@ -3278,6 +3334,18 @@ export class ChatView extends ItemView {
   private send(): void {
     const text = this.inputEl.value.trim();
     if (!text && this.pendingImages.length === 0) return;
+    // `/compact [instructions]` is a local slash command, not a chat turn: route
+    // it to compaction (mirrors the CLI, which intercepts /compact client-side)
+    // instead of sending it to the model. Matches exactly "/compact" or
+    // "/compact <instructions>" — never "/compactfoo".
+    if (text === "/compact" || text.startsWith("/compact ")) {
+      const instructions = text.slice("/compact".length).trim();
+      this.inputEl.value = "";
+      this.autoGrow();
+      // compactActive() Notices on the no-session / streaming / non-Claude cases.
+      this.compactActive(instructions || undefined);
+      return;
+    }
     this.inputEl.value = "";
     this.autoGrow();
     const images = this.pendingImages.length ? this.pendingImages : undefined;
