@@ -2693,13 +2693,8 @@ export class ChatView extends ItemView {
             suspendWatchdog();
             break;
           }
-          // Feature 4: a subagent's tool call nests under its parent Task card
-          // (ephemeral, live-only). Falls through to a flat card if the parent
-          // isn't tracked, so nothing is lost.
-          if (e.parentId && this.addSubagentRow(ctx, e.parentId, e.id, e.name, e.input)) break;
-          this.addToolCard(ctx, e.id, e.name, e.input);
-          if (e.name === "Task") this.registerTaskCard(ctx, e.id);
-          this.trackBackgroundTask(ctx, e.id, e.name, e.input);
+          // File tracking runs before the nesting branch: subagent writes must stay
+          // rewindable (checkpoint) and visible in the touched-notes footer.
           const fp = toolFilePath(e.name, e.input);
           if (fp) {
             const kind = ChatView.WRITE_TOOLS.test(e.name) ? "write" : "read";
@@ -2713,6 +2708,13 @@ export class ChatView extends ItemView {
               existing.count = (existing.count ?? 0) + 1;
             }
           }
+          // Feature 4: a subagent's tool call nests under its parent Task card
+          // (ephemeral, live-only). Falls through to a flat card if the parent
+          // isn't tracked, so nothing is lost.
+          if (e.parentId && this.addSubagentRow(ctx, e.parentId, e.id, e.name, e.input)) break;
+          this.addToolCard(ctx, e.id, e.name, e.input);
+          if (e.name === "Task") this.registerTaskCard(ctx, e.id);
+          this.trackBackgroundTask(ctx, e.id, e.name, e.input);
           break;
         }
         case "tool-call-result": {
@@ -2721,11 +2723,14 @@ export class ChatView extends ItemView {
             resumeWatchdog(); // the ask card has been answered/dismissed
             break;
           }
-          // Feature 4: a nested subagent result updates its mini-row, not a card.
-          if (this.resolveSubagentRow(ctx, e.id, e.ok)) break;
-          this.resolveToolCard(ctx, e.id, e.ok, e.output);
-          this.linkBackgroundResult(ctx, e.id, e.output);
-          this.markTaskDone(ctx, e.id); // Task's own result → mark section done
+          // Feature 4: a nested subagent result updates its mini-row, not a card —
+          // but the reveal path below still runs for nested writes.
+          const nested = this.resolveSubagentRow(ctx, e.id, e.ok);
+          if (!nested) {
+            this.resolveToolCard(ctx, e.id, e.ok, e.output);
+            this.linkBackgroundResult(ctx, e.id, e.output);
+            this.markTaskDone(ctx, e.id); // Task's own result → mark section done
+          }
           const wp = ctx.writeById.get(e.id);
           if (e.ok && wp && this.plugin.settings.revealEditedNotes && !ctx.revealed.has(wp)) {
             ctx.revealed.add(wp);
