@@ -2150,3 +2150,43 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   }
   .mva-caret { animation: none; opacity: 1; }
 }
+
+/* ---------------------- gallery card delete --------------------------- */
+.mva-card {
+  position: relative;
+}
+.mva-gal-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--mva-r1);
+  color: var(--text-muted);
+  background: var(--background-primary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--mva-t), color var(--mva-t), background var(--mva-t);
+}
+.mva-card:hover .mva-gal-del {
+  opacity: 0.7;
+}
+.mva-gal-del:hover {
+  opacity: 1;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.mva-gal-del .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+.mva-gal-del.is-armed,
+.mva-card:hover .mva-gal-del.is-armed {
+  opacity: 1;
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 15%, transparent);
+}

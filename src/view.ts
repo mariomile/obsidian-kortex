@@ -1002,6 +1002,7 @@ export class ChatView extends ItemView {
   private renderCard(grid: HTMLElement, c: Convo): void {
     const card = grid.createDiv({ cls: "mva-card" });
     if (c === this.active) card.addClass("is-active");
+    this.addCardDelete(card, grid, c);
     const head = card.createDiv({ cls: "mva-card-head" });
     const dot = head.createSpan({ cls: "mva-dot" });
     dot.style.background = ADAPTERS[c.provider].brandColor;
@@ -1021,6 +1022,94 @@ export class ChatView extends ItemView {
       this.hideGallery();
       this.switchTo(c);
     });
+  }
+
+  /** Trash button on a gallery card: two-step confirm (arm → delete), reusing the
+   *  note-revert arming pattern. Never bubbles to the card's open handler. */
+  private addCardDelete(card: HTMLElement, grid: HTMLElement, c: Convo): void {
+    const del = card.createSpan({ cls: "mva-gal-del", attr: { "aria-label": "Delete conversation" } });
+    setIcon(del, "trash-2");
+    let armed = false;
+    let disarmTimer: number | null = null;
+    const outside = (ev: MouseEvent) => {
+      if (ev.target !== del && !del.contains(ev.target as Node)) disarm();
+    };
+    const disarm = () => {
+      armed = false;
+      del.removeClass("is-armed");
+      del.setAttr("aria-label", "Delete conversation");
+      if (disarmTimer) {
+        window.clearTimeout(disarmTimer);
+        disarmTimer = null;
+      }
+      document.removeEventListener("click", outside, true);
+    };
+    del.onclick = (e) => {
+      e.stopPropagation();
+      if (!armed) {
+        armed = true;
+        del.addClass("is-armed");
+        del.setAttr("aria-label", "Click again to delete");
+        disarmTimer = window.setTimeout(disarm, 3000);
+        document.addEventListener("click", outside, true);
+        return;
+      }
+      disarm();
+      this.deleteConvo(c, card, grid);
+    };
+  }
+
+  /** Permanently drop a conversation (from the gallery). If it's the active tab,
+   *  switch to a neighbor — or a fresh convo when none remain — exactly like the
+   *  close-tab flow, but keep the gallery open and just remove its card. */
+  private deleteConvo(c: Convo, card: HTMLElement, grid: HTMLElement): void {
+    this.dropSession(c);
+    const tabIdx = this.openTabs.indexOf(c.id);
+    if (tabIdx !== -1) this.openTabs.splice(tabIdx, 1);
+    const convoIdx = this.convos.indexOf(c);
+    if (convoIdx !== -1) this.convos.splice(convoIdx, 1);
+
+    if (c === this.active) {
+      const nextId =
+        this.openTabs[tabIdx] ?? this.openTabs[tabIdx - 1] ?? this.openTabs[this.openTabs.length - 1];
+      let next = nextId ? this.convos.find((x) => x.id === nextId) : undefined;
+      if (!next) next = this.convos[0];
+      if (!next) {
+        next = this.makeConvo();
+        this.convos.push(next);
+        this.openTabs.push(next.id);
+      }
+      c.listEl.remove();
+      this.setActiveSilently(next);
+    } else {
+      this.renderTabs();
+      this.persistTabs();
+    }
+
+    card.remove();
+    if (!grid.querySelector(".mva-card")) {
+      grid.createDiv({ cls: "mva-empty-sub", text: "No conversations yet." });
+    }
+    this.persist();
+  }
+
+  /** Point `active` at another conversation without leaving the gallery overlay:
+   *  its transcript is prepared (rendered, hidden behind the gallery) so a later
+   *  hideGallery/switchTo reveals it correctly. */
+  private setActiveSilently(next: Convo): void {
+    this.active = next;
+    this.provider = next.provider;
+    this.model = next.model;
+    if (!this.openTabs.includes(next.id)) this.openTabs.push(next.id);
+    if (next.messages.length && next.listEl.childElementCount === 0) this.renderConvoDom(next);
+    next.listEl.hide(); // gallery is on top; reveal happens on hideGallery/switchTo
+    this.listWrap.appendChild(next.listEl);
+    if (next.listEl.childElementCount === 0) this.renderEmptyState();
+    this.refreshProviderUI();
+    this.syncSendButton();
+    this.updateUsage(null);
+    this.renderTabs();
+    this.persistTabs();
   }
 
   private convoPreview(c: Convo): string {
