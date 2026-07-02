@@ -231,6 +231,13 @@ export class ChatView extends ItemView {
   private lastPersistErrorNotice = 0;
   private pendingImages: ImageAttachment[] = [];
   private imagesEl!: HTMLElement;
+  /** Whether the view auto-follows new content to the bottom. False once the
+   *  user scrolls up, so streaming no longer yanks them back down. */
+  private pinnedToBottom = true;
+  /** Coalesces scroll writes into one rAF per frame. */
+  private scrollRaf: number | null = null;
+  /** Floating jump-to-bottom button (lazily created). */
+  private jumpPill: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: ExoPlugin) {
     super(leaf);
@@ -509,6 +516,7 @@ export class ChatView extends ItemView {
         pendingEl: null,
       };
       this.renderConvoDom(c);
+      this.wireScroll(c);
       this.convos.push(c);
     }
     convoSeed = Math.max(convoSeed, this.convos.length);
@@ -594,7 +602,7 @@ export class ChatView extends ItemView {
   /* ------------------------- conversations -------------------------- */
 
   private makeConvo(): Convo {
-    return {
+    const c: Convo = {
       id: `c${++convoSeed}`,
       listEl: createDiv({ cls: "mva-list" }),
       title: "New chat",
@@ -611,6 +619,8 @@ export class ChatView extends ItemView {
       queue: [],
       pendingEl: null,
     };
+    this.wireScroll(c);
+    return c;
   }
 
   private saveActive(): void {
@@ -641,6 +651,9 @@ export class ChatView extends ItemView {
     if (!this.openTabs.includes(c.id)) this.openTabs.push(c.id);
     this.provider = c.provider;
     this.model = c.model;
+    // A fresh tab should always start pinned so you see the latest content.
+    this.pinnedToBottom = true;
+    this.updateJumpPill();
     this.listWrap.empty();
     this.listWrap.appendChild(c.listEl);
     if (c.listEl.childElementCount === 0) this.renderEmptyState();
@@ -2600,9 +2613,53 @@ export class ChatView extends ItemView {
     this.scrollConvo(this.active);
   }
 
-  /** Scroll a conversation to the bottom — only if it's the visible one. */
+  /** Scroll a conversation to the bottom — only if it's the visible one AND the
+   *  user hasn't scrolled up. Coalesced into one rAF write per frame to avoid
+   *  layout thrash during streaming. */
   private scrollConvo(c: Convo): void {
-    if (c === this.active) this.listEl.scrollTop = this.listEl.scrollHeight;
+    if (c !== this.active || !this.pinnedToBottom) {
+      this.updateJumpPill();
+      return;
+    }
+    if (this.scrollRaf !== null) return;
+    this.scrollRaf = requestAnimationFrame(() => {
+      this.scrollRaf = null;
+      this.listEl.scrollTop = this.listEl.scrollHeight;
+      this.updateJumpPill();
+    });
+  }
+
+  /** Attach the scroll-position tracker to a conversation's list element. */
+  private wireScroll(c: Convo): void {
+    this.registerDomEvent(c.listEl, "scroll", () => {
+      if (c !== this.active) return;
+      const el = c.listEl;
+      this.pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      this.updateJumpPill();
+    });
+  }
+
+  /** Show/hide the floating jump-to-bottom pill based on pin state. */
+  private updateJumpPill(): void {
+    const show = !this.pinnedToBottom;
+    if (show) {
+      if (!this.jumpPill) {
+        const pill = this.listWrap.createDiv({
+          cls: "mva-jump-pill",
+          attr: { "aria-label": "Jump to latest" },
+        });
+        setIcon(pill, "chevron-down");
+        this.clickable(pill, () => {
+          this.pinnedToBottom = true;
+          this.listEl.scrollTop = this.listEl.scrollHeight;
+          this.updateJumpPill();
+        });
+        this.jumpPill = pill;
+      }
+    } else if (this.jumpPill) {
+      this.jumpPill.remove();
+      this.jumpPill = null;
+    }
   }
 
   private setStreaming(c: Convo, on: boolean): void {
@@ -2630,6 +2687,9 @@ export class ChatView extends ItemView {
     this.pendingImages = [];
     this.renderImageStrip();
     const c = this.active;
+    // You always want to watch your own message land.
+    this.pinnedToBottom = true;
+    this.updateJumpPill();
     if (c.streaming) {
       c.queue.push({ text, images }); // queue while a turn is running
       this.renderQueue(c);
