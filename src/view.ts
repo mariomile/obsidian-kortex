@@ -1895,8 +1895,14 @@ export class ChatView extends ItemView {
 
   private addUserTurn(c: Convo, text: string, images?: ImageAttachment[]): void {
     this.clearEmptyState(c);
-    if (c.title === "New chat") {
-      c.title = text.slice(0, 48) || (images?.length ? "Image" : "New chat");
+    // Derive the tab title from the first user message. The untitled state is
+    // represented inconsistently across the view — every render site falls back
+    // with `c.title || "New chat"`, so a falsy title still *shows* as "New chat"
+    // while failing an exact `=== "New chat"` check. Treat any falsy title OR the
+    // literal default as untitled so the first message always names the tab.
+    if (!c.title || c.title === "New chat") {
+      const derived = text.replace(/\s+/g, " ").trim().slice(0, 40);
+      c.title = derived || (images?.length ? "Image" : "New chat");
       this.renderTabs(); // reflect the new title in the tab
     }
     c.messages.push({ role: "user", text });
