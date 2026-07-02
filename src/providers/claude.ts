@@ -40,9 +40,17 @@ class ClaudeSession implements AgentSession {
   /** Per-turn tail of CLI stderr lines, surfaced when a turn ends in an error whose
    *  `result` is empty (e.g. error_during_execution). Cleared at the start of send(). */
   private stderrTail: string[] = [];
+  /** Resolved when the CLI reports session init (system/init message) — the point
+   *  at which in-process MCP tools are registered. The first send awaits this so
+   *  turn 1 never races the MCP handshake (which would run without mcp__obsidian__
+   *  tools). A 10s fallback guarantees a missing init can never deadlock a send. */
+  private ready: Promise<void>;
+  private markReady!: () => void;
 
   constructor(opts: SessionOpts) {
     this.sessionId = opts.resumeSessionId;
+    this.ready = new Promise<void>((r) => (this.markReady = r));
+    setTimeout(() => this.markReady(), 10_000);
     const self = this;
     async function* input(): AsyncGenerator<{
       type: "user";
@@ -179,6 +187,10 @@ class ClaudeSession implements AgentSession {
 
   private route(msg: ClaudeMsg): void {
     if (msg.session_id) this.sessionId = msg.session_id;
+    // Session init: MCP servers are handshaken and tools registered. Must run
+    // BEFORE the emit guard — with pre-warm, init arrives while no turn (and no
+    // onEvent) is attached yet.
+    if (msg.type === "system" && msg.subtype === "init") this.markReady();
     const emit = this.onEvent;
     if (!emit) return;
 
@@ -269,12 +281,19 @@ class ClaudeSession implements AgentSession {
           ]
         : message;
     return new Promise<void>((resolve, reject) => {
+      // Turn handles are claimed synchronously (keeps the overlapping-turn guard
+      // race-free); only the actual push waits for session init. Warm sessions
+      // resolve `ready` immediately, so this adds zero latency to later turns.
       this.resolveTurn = resolve;
       this.rejectTurn = reject;
-      this.queue.push({ role: "user", content });
-      const w = this.wake;
-      this.wake = null;
-      w?.();
+      void this.ready.then(() => {
+        // Disposed while waiting: settleTurn already rejected this promise.
+        if (this.disposed) return;
+        this.queue.push({ role: "user", content });
+        const w = this.wake;
+        this.wake = null;
+        w?.();
+      });
     });
   }
 
@@ -321,6 +340,7 @@ class ClaudeSession implements AgentSession {
   dispose(): void {
     if (this.disposed) return; // idempotent — dispose may be called more than once
     this.disposed = true;
+    this.markReady(); // release any send() parked on session init
     this.denyPending?.();
     try {
       this.wake?.();
