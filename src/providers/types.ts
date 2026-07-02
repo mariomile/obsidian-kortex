@@ -22,8 +22,8 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermiss
 export type AgentEvent =
   | { kind: "text-delta"; text: string }
   | { kind: "thinking-delta"; text: string }
-  | { kind: "tool-call-start"; id: string; name: string; input: unknown }
-  | { kind: "tool-call-result"; id: string; ok: boolean; output: string }
+  | { kind: "tool-call-start"; id: string; name: string; input: unknown; parentId?: string }
+  | { kind: "tool-call-result"; id: string; ok: boolean; output: string; parentId?: string }
   | {
       kind: "permission-request";
       id: string;

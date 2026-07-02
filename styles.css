@@ -1018,6 +1018,58 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-bg-foot {
   margin-top: 6px;
 }
+/* Nested subagent activity under a Task card (F4). */
+.mva-subagent {
+  margin: 0 10px 8px;
+  padding-left: 9px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+.mva-subagent-summary {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 0;
+}
+.mva-subagent-summary:hover {
+  color: var(--text-normal);
+}
+.mva-subagent.is-collapsed .mva-subagent-rows {
+  display: none;
+}
+.mva-subagent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 2px 0;
+}
+.mva-subagent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--mva-brand, var(--interactive-accent));
+}
+.mva-subagent-dot.is-ok {
+  background: var(--color-green, #19c37d);
+}
+.mva-subagent-dot.is-error {
+  background: var(--text-error);
+}
+.mva-subagent-tool {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.mva-subagent-arg {
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .mva-tool-output {
   margin: 8px 0 0;
   max-height: 220px;

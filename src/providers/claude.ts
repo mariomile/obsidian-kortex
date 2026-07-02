@@ -183,12 +183,16 @@ class ClaudeSession implements AgentSession {
         }
       }
     } else if (msg.type === "assistant") {
+      // Subagent (Task) tool activity carries the parent Task's tool_use id so the
+      // view can nest it under that card instead of rendering flat top-level cards.
+      const pid = msg.parent_tool_use_id ?? undefined;
       for (const b of msg.message?.content ?? []) {
         if (b.type === "tool_use") {
-          emit({ kind: "tool-call-start", id: b.id ?? "", name: b.name ?? "", input: b.input });
+          emit({ kind: "tool-call-start", id: b.id ?? "", name: b.name ?? "", input: b.input, parentId: pid });
         }
       }
     } else if (msg.type === "user") {
+      const pid = msg.parent_tool_use_id ?? undefined;
       const c = msg.message?.content;
       if (Array.isArray(c)) {
         for (const b of c) {
@@ -198,6 +202,7 @@ class ClaudeSession implements AgentSession {
               id: b.tool_use_id ?? "",
               ok: !b.is_error,
               output: stringifyToolResult(b.content),
+              parentId: pid,
             });
           }
         }
@@ -366,6 +371,7 @@ interface ClaudeMsg {
   type?: string;
   subtype?: string;
   session_id?: string;
+  parent_tool_use_id?: string | null;
   result?: string;
   compact_summary?: string;
   event?: { type?: string; delta?: { type?: string; text?: string; thinking?: string } };

@@ -147,6 +147,10 @@ interface AssistantCtx {
   todosEl: HTMLElement | null;
   /** Background Bash tasks this turn: tool-call id → card + badge + parsed shell id. */
   bgTasks: Map<string, { cardEl: HTMLElement; badgeEl: HTMLElement; shellId?: string }>;
+  /** Task (subagent) cards this turn: Task tool-call id → nested activity section. */
+  taskCards: Map<string, { container: HTMLElement; summaryEl: HTMLElement; rowsEl: HTMLElement; count: number }>;
+  /** Subagent mini-rows this turn (live-only): tool-call id → status dot + parent. */
+  nestedRows: Map<string, { dotEl: HTMLElement; parentId: string }>;
 }
 
 /** Abort a turn if no event arrives for this long (avoids infinite loading). */
@@ -1723,6 +1727,8 @@ export class ChatView extends ItemView {
       renderTimer: null,
       todosEl: null,
       bgTasks: new Map(),
+      taskCards: new Map(),
+      nestedRows: new Map(),
     };
     this.askTargetCtx = ctx;
     this.scrollConvo(c);
@@ -2252,6 +2258,52 @@ export class ChatView extends ItemView {
     if (sid) task.shellId = sid;
   }
 
+  /* ------------------------ subagents (F4) ------------------------- */
+
+  /** Register a Task card as a nesting target: a collapsed "Subagent activity (N)"
+   *  section appended below the card, into which the subagent's tool calls nest. */
+  private registerTaskCard(ctx: AssistantCtx, id: string): void {
+    const card = ctx.cards.get(id)?.card;
+    if (!card) return;
+    const container = card.createDiv({ cls: "mva-subagent is-collapsed" });
+    const summaryEl = container.createDiv({ cls: "mva-subagent-summary", text: "Subagent activity (0)" });
+    const rowsEl = container.createDiv({ cls: "mva-subagent-rows" });
+    this.clickable(summaryEl, () => container.toggleClass("is-collapsed", !container.hasClass("is-collapsed")));
+    ctx.taskCards.set(id, { container, summaryEl, rowsEl, count: 0 });
+  }
+
+  /** Nest a subagent tool call as a mini-row under its parent Task card. Returns
+   *  false if the parent isn't tracked, so the caller can fall back to a flat card. */
+  private addSubagentRow(ctx: AssistantCtx, parentId: string, id: string, name: string, input: unknown): boolean {
+    const task = ctx.taskCards.get(parentId);
+    if (!task) return false;
+    const meta = toolMeta(name, input);
+    const row = task.rowsEl.createDiv({ cls: "mva-subagent-row" });
+    const dot = row.createSpan({ cls: "mva-subagent-dot" });
+    row.createSpan({ cls: "mva-subagent-tool", text: meta.label });
+    if (meta.target) row.createSpan({ cls: "mva-subagent-arg", text: meta.target });
+    task.count++;
+    task.summaryEl.setText(`Subagent activity (${task.count})`);
+    ctx.nestedRows.set(id, { dotEl: dot, parentId });
+    this.scrollConvo(ctx.convo);
+    return true;
+  }
+
+  /** Mark a subagent mini-row ok/error on its result. Returns false if not nested. */
+  private resolveSubagentRow(ctx: AssistantCtx, id: string, ok: boolean): boolean {
+    const row = ctx.nestedRows.get(id);
+    if (!row) return false;
+    row.dotEl.addClass(ok ? "is-ok" : "is-error");
+    return true;
+  }
+
+  /** On the Task's own result, mark its subagent section complete. */
+  private markTaskDone(ctx: AssistantCtx, id: string): void {
+    const task = ctx.taskCards.get(id);
+    if (!task) return;
+    task.summaryEl.setText(`Subagent activity (${task.count}) — done`);
+  }
+
   /* -------------------------- permissions --------------------------- */
 
   /** Signature for the "Always allow" list — argument-aware so allowing one
@@ -2641,7 +2693,12 @@ export class ChatView extends ItemView {
             suspendWatchdog();
             break;
           }
+          // Feature 4: a subagent's tool call nests under its parent Task card
+          // (ephemeral, live-only). Falls through to a flat card if the parent
+          // isn't tracked, so nothing is lost.
+          if (e.parentId && this.addSubagentRow(ctx, e.parentId, e.id, e.name, e.input)) break;
           this.addToolCard(ctx, e.id, e.name, e.input);
+          if (e.name === "Task") this.registerTaskCard(ctx, e.id);
           this.trackBackgroundTask(ctx, e.id, e.name, e.input);
           const fp = toolFilePath(e.name, e.input);
           if (fp) {
@@ -2664,8 +2721,11 @@ export class ChatView extends ItemView {
             resumeWatchdog(); // the ask card has been answered/dismissed
             break;
           }
+          // Feature 4: a nested subagent result updates its mini-row, not a card.
+          if (this.resolveSubagentRow(ctx, e.id, e.ok)) break;
           this.resolveToolCard(ctx, e.id, e.ok, e.output);
           this.linkBackgroundResult(ctx, e.id, e.output);
+          this.markTaskDone(ctx, e.id); // Task's own result → mark section done
           const wp = ctx.writeById.get(e.id);
           if (e.ok && wp && this.plugin.settings.revealEditedNotes && !ctx.revealed.has(wp)) {
             ctx.revealed.add(wp);
