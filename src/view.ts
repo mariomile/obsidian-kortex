@@ -181,7 +181,10 @@ function stableBoundary(md: string): number {
 }
 
 /** One rule per line: `Tool` or `Tool(argPrefix)`. `#` comments allowed. A bare
- *  `Tool` matches any invocation; a prefix matches when argText starts with it. */
+ *  `Tool` matches any invocation. For `Bash` the prefix matches on a TOKEN
+ *  boundary — `Bash(rm)` matches `rm -rf x` but NOT `rmdir` (a plain prefix
+ *  would silently widen shell rules to unrelated commands). For every other
+ *  tool the argument is a path/target, where prefix-of-path is the intent. */
 function matchPermRule(rules: string, tool: string, argText: string): boolean {
   for (const raw of rules.split("\n")) {
     const line = raw.trim();
@@ -189,7 +192,12 @@ function matchPermRule(rules: string, tool: string, argText: string): boolean {
     const m = line.match(/^([\w-]+(?:__[\w-]+)*)(?:\((.*?)\))?$/);
     if (!m || m[1] !== tool) continue;
     const prefix = (m[2] ?? "").replace(/\*+$/, "");
-    if (!prefix || argText.startsWith(prefix)) return true;
+    if (!prefix) return true;
+    if (tool === "Bash") {
+      if (argText === prefix || argText.startsWith(prefix + " ")) return true;
+    } else if (argText.startsWith(prefix)) {
+      return true;
+    }
   }
   return false;
 }
@@ -1248,7 +1256,7 @@ export class ChatView extends ItemView {
   }
 
   /** Tool names that mutate a note — used to classify touched notes as read vs write. */
-  private static readonly WRITE_TOOLS = /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links|edit_note|insert_at_cursor|rename_note/;
+  private static readonly WRITE_TOOLS = /Write|Edit|MultiEdit|NotebookEdit|append_to_note|update_frontmatter|create_note|add_links|edit_note|insert_at_cursor|rename_note/;
 
   private static readonly EFFORT_OPTS: [string, string][] = [
     ["default", "Default"],
@@ -2990,8 +2998,9 @@ export class ChatView extends ItemView {
           }
           const isRead = READ_ONLY_TOOLS.has(e.tool) || OBSIDIAN_READ_TOOLS.has(e.tool);
           const fp = toolFilePath(e.tool, e.input);
-          const isWrite =
-            !!fp && /Write|Edit|MultiEdit|append_to_note|update_frontmatter|create_note|add_links|NotebookEdit|edit_note|rename_note/.test(e.tool);
+          // Single source of truth for write-tool classification (WRITE_TOOLS) so
+          // checkpointing, touched-footer, and rules can never disagree.
+          const isWrite = !!fp && ChatView.WRITE_TOOLS.test(e.tool);
           // Snapshot the target file (pre-edit) before letting a write proceed.
           const allow = (d: { behavior: "allow"; remember?: boolean }) => {
             if (isWrite && fp) void this.snapshot(checkpoint, fp).finally(() => e.resolve(d));

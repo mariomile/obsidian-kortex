@@ -364,7 +364,9 @@ export class MVASettingTab extends PluginSettingTab {
         })
       );
 
-    const rulesDesc = "One per line: ToolName or ToolName(argument prefix). Deny wins. These apply before the permission card.";
+    const rulesDesc =
+      "One per line: ToolName or ToolName(argument prefix). Deny wins. These apply before the permission card. " +
+      "Bash prefixes match whole commands/arguments — Bash(rm) covers 'rm -rf x' but not 'rmdir'. Other tools match the target path by plain prefix.";
     new Setting(containerEl)
       .setName("Always-allow rules")
       .setDesc(rulesDesc)
