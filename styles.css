@@ -2101,6 +2101,39 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   cursor: pointer;
 }
 
+/* In-conversation variant: same chip language as .mva-surface above, but
+   quieter — it fills otherwise-dead space below a short transcript, so it
+   should read as ambient rather than as another prompt. A hairline top
+   border gives it just enough separation from the last turn without a full
+   section break. */
+.mva-tail-surface {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mva-tail-surface-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+.mva-tail-surface-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mva-tail-surface-chip {
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity var(--mva-t);
+}
+.mva-tail-surface-chip:hover {
+  opacity: 1;
+}
+
 /* ------------------------------- queue -------------------------------- */
 .mva-queue {
   display: flex;

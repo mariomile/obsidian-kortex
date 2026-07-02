@@ -122,6 +122,9 @@ interface Convo {
    *  target for its session's ask_user cards, so parallel conversations can't
    *  cross-render into each other's transcripts. */
   currentCtx: AssistantCtx | null;
+  /** The discreet "Related" section appended below the last turn when the
+   *  transcript doesn't fill the viewport (null when not shown). */
+  tailSurfaceEl: HTMLElement | null;
 }
 
 interface AssistantCtx {
@@ -345,6 +348,11 @@ export class ChatView extends ItemView {
         this.refreshSurfacing();
       })
     );
+    // Resizing the pane can flip a short transcript into overflow (or back) without
+    // any content change — keep the tail "Related" section in sync with that too.
+    const tailResizeObserver = new ResizeObserver(() => this.renderTailSurfacing(this.active));
+    tailResizeObserver.observe(this.listWrap);
+    this.register(() => tailResizeObserver.disconnect());
     this.prewarm();
   }
 
@@ -615,6 +623,7 @@ export class ChatView extends ItemView {
         queue: [],
         pendingEl: null,
         currentCtx: null,
+        tailSurfaceEl: null,
       };
       if (wantDom.has(c.id)) this.renderConvoDom(c);
       this.wireScroll(c);
@@ -649,6 +658,7 @@ export class ChatView extends ItemView {
     this.refreshProviderUI();
     this.renderTabs();
     this.scrollToBottom();
+    this.renderTailSurfacing(this.active);
   }
 
   private serialize(): ConvoData[] {
@@ -725,6 +735,7 @@ export class ChatView extends ItemView {
       queue: [],
       pendingEl: null,
       currentCtx: null,
+      tailSurfaceEl: null,
     };
     this.wireScroll(c);
     return c;
@@ -773,6 +784,7 @@ export class ChatView extends ItemView {
     this.renderTabs();
     this.persistTabs();
     this.scrollConvo(c);
+    this.renderTailSurfacing(c);
     this.prewarm();
   }
 
@@ -1891,18 +1903,21 @@ export class ChatView extends ItemView {
     render(Math.min(limit, items.length));
   }
 
-  /** Surface notes related to the active note (toggleable). */
-  private renderSurfacing(empty: HTMLElement): void {
-    if (!this.plugin.settings.featureSurfacing) return;
-    const file = this.app.workspace.getActiveFile();
-    if (!file) return;
-    const related = relatedNotes(this.app, file, 5);
-    if (!related.length) return;
-    const wrap = empty.createDiv({ cls: "mva-surface" });
-    wrap.createDiv({ cls: "mva-surface-label", text: `Related to ${noteBasename(file.path)}` });
-    const row = wrap.createDiv({ cls: "mva-surface-chips" });
+  /** Build a labelled row of "related note" chips inside `container`. Clicking a
+   *  chip attaches the note as context and focuses the composer. Shared by the
+   *  empty-state surfacing and the quieter in-conversation tail variant — only
+   *  the classes (and therefore the look) differ between the two. Returns the
+   *  wrapper element so callers can track/remove it. */
+  private buildRelatedChips(
+    container: HTMLElement,
+    related: string[],
+    opts: { wrapCls: string; labelCls: string; labelText: string; rowCls: string; chipCls: string }
+  ): HTMLElement {
+    const wrap = container.createDiv({ cls: opts.wrapCls });
+    wrap.createDiv({ cls: opts.labelCls, text: opts.labelText });
+    const row = wrap.createDiv({ cls: opts.rowCls });
     for (const p of related) {
-      const chip = row.createDiv({ cls: "mva-chip mva-surface-chip" });
+      const chip = row.createDiv({ cls: `mva-chip ${opts.chipCls}` });
       setIcon(chip.createSpan({ cls: "mva-chip-icon" }), "file-text");
       chip.createSpan({ cls: "mva-chip-label", text: noteBasename(p) });
       this.clickable(chip, () => {
@@ -1911,18 +1926,72 @@ export class ChatView extends ItemView {
         this.inputEl.focus();
       });
     }
+    return wrap;
+  }
+
+  /** Surface notes related to the active note (toggleable). */
+  private renderSurfacing(empty: HTMLElement): void {
+    if (!this.plugin.settings.featureSurfacing) return;
+    const file = this.app.workspace.getActiveFile();
+    if (!file) return;
+    const related = relatedNotes(this.app, file, 5);
+    if (!related.length) return;
+    this.buildRelatedChips(empty, related, {
+      wrapCls: "mva-surface",
+      labelCls: "mva-surface-label",
+      labelText: `Related to ${noteBasename(file.path)}`,
+      rowCls: "mva-surface-chips",
+      chipCls: "mva-surface-chip",
+    });
+  }
+
+  /** Quieter "Related" chips appended below the last turn — only when the
+   *  transcript is short enough that it leaves dead space under the viewport.
+   *  Always clears any previous instance first, so callers can invoke it
+   *  freely to recompute or hide. Never shows mid-stream, on background
+   *  (non-active) conversations, or while the empty state is up (that has its
+   *  own, bolder variant above). */
+  private renderTailSurfacing(c: Convo): void {
+    c.tailSurfaceEl?.remove();
+    c.tailSurfaceEl = null;
+    if (!this.plugin.settings.featureSurfacing) return;
+    if (c.streaming) return;
+    if (c !== this.active) return; // only the visible list can be measured
+    if (!c.messages.length) return; // empty state owns this case
+    const el = c.listEl;
+    if (el.scrollHeight > el.clientHeight + 1) return; // already fills/overflows
+    const file = this.app.workspace.getActiveFile();
+    if (!file) return;
+    const related = relatedNotes(this.app, file, 5).slice(0, 3);
+    if (!related.length) return;
+    const wrap = this.buildRelatedChips(el, related, {
+      wrapCls: "mva-tail-surface",
+      labelCls: "mva-tail-surface-label",
+      labelText: "Related",
+      rowCls: "mva-tail-surface-chips",
+      chipCls: "mva-tail-surface-chip",
+    });
+    c.tailSurfaceEl = wrap;
+    // Adding the section itself might tip the list into overflow — undo if so.
+    if (el.scrollHeight > el.clientHeight + 1) {
+      wrap.remove();
+      c.tailSurfaceEl = null;
+    }
   }
 
   private clearEmptyState(c: Convo = this.active): void {
     c.listEl.querySelector(".mva-empty")?.remove();
   }
 
-  /** Re-render the empty state (surfacing) when the active note changes. */
+  /** Re-render the empty state (surfacing) when the active note changes, or
+   *  recompute the in-conversation tail variant when there's a transcript. */
   private refreshSurfacing(): void {
     if (this.listEl.querySelector(".mva-empty")) {
       this.listEl.empty();
       this.renderEmptyState();
+      return;
     }
+    this.renderTailSurfacing(this.active);
   }
 
   /** Rebuild a conversation's DOM from its persisted messages. */
@@ -3187,6 +3256,13 @@ export class ChatView extends ItemView {
     c.streaming = on;
     if (c === this.active) this.syncSendButton();
     this.renderTabs(); // keep the per-tab streaming dot in sync
+    // Never show the tail "Related" section mid-stream — hide it the instant a
+    // turn starts. The turn-end path (runTurn's `finally`) is responsible for
+    // re-showing it once the queue is fully drained.
+    if (on) {
+      c.tailSurfaceEl?.remove();
+      c.tailSurfaceEl = null;
+    }
   }
 
   private stop(): void {
@@ -3605,6 +3681,9 @@ export class ChatView extends ItemView {
         const next = c.queue.shift()!;
         this.renderQueue(c);
         void this.runTurn(c, next.text, next.images);
+      } else {
+        // Turn (and any queue) is fully settled — safe to surface related notes again.
+        this.renderTailSurfacing(c);
       }
     }
   }
