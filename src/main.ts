@@ -5,6 +5,8 @@ import { ADAPTERS } from "./providers/registry";
 import { resolveCli } from "./cli";
 import { InlineEditModal } from "./ui/inline-edit";
 import type { AgentEvent } from "./providers/types";
+import { computePlan, applyPlan, undoPlan, type DreamSnapshot } from "./obsidian/dream";
+import { DreamModal } from "./ui/dream-modal";
 
 export default class ExoPlugin extends Plugin {
   settings!: MVASettings;
@@ -65,6 +67,37 @@ export default class ExoPlugin extends Plugin {
         this.inlineEdit(editor);
       },
     });
+
+    this.addCommand({
+      id: "memory-dream-pass",
+      name: "Run memory dream pass (consolidate _system/memory)",
+      callback: () => {
+        const plan = computePlan(this.app);
+        new DreamModal(this.app, plan, async () => {
+          const snap = await applyPlan(this.app, plan, new Date().toISOString());
+          await this.saveDreamSnapshot(snap);
+          new Notice(
+            `Dream pass: ${plan.promote.length} promoted, ${plan.dedup.length} merged, ${plan.stale.length} marked stale. Undo from the command palette.`
+          );
+        }).open();
+      },
+    });
+    this.addCommand({
+      id: "memory-dream-undo",
+      name: "Undo last memory dream pass",
+      callback: async () => {
+        const snap = await this.loadDreamSnapshot();
+        if (!snap) {
+          new Notice("No dream pass to undo.");
+          return;
+        }
+        const n = await undoPlan(this.app, snap);
+        await this.clearDreamSnapshot();
+        new Notice(`Undid the dream pass — restored ${n} file(s).`);
+      },
+    });
+    // Hourly check; runs a scheduled pass only when due per settings.
+    this.registerInterval(window.setInterval(() => void this.maybeScheduledDreamPass(), 60 * 60 * 1000));
 
     this.addSettingTab(new MVASettingTab(this.app, this));
   }
@@ -189,5 +222,49 @@ export default class ExoPlugin extends Plugin {
     } catch {
       return false;
     }
+  }
+
+  private dreamFile(): string {
+    return `${this.manifest.dir}/dream-snapshot.json`;
+  }
+  async saveDreamSnapshot(s: DreamSnapshot): Promise<void> {
+    try {
+      await this.app.vault.adapter.write(this.dreamFile(), JSON.stringify(s));
+    } catch {
+      /* non-fatal */
+    }
+  }
+  async loadDreamSnapshot(): Promise<DreamSnapshot | null> {
+    try {
+      const p = this.dreamFile();
+      if (await this.app.vault.adapter.exists(p)) return JSON.parse(await this.app.vault.adapter.read(p)) as DreamSnapshot;
+    } catch {
+      /* corrupt/missing */
+    }
+    return null;
+  }
+  async clearDreamSnapshot(): Promise<void> {
+    try {
+      const p = this.dreamFile();
+      if (await this.app.vault.adapter.exists(p)) await this.app.vault.adapter.remove(p);
+    } catch {
+      /* ignore */
+    }
+  }
+  private async maybeScheduledDreamPass(): Promise<void> {
+    const sched = this.settings.dreamPassSchedule;
+    if (sched === "off") return;
+    const now = Date.now();
+    const period = sched === "daily" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    if (this.settings.lastDreamPass && now - this.settings.lastDreamPass < period) return;
+    const plan = computePlan(this.app);
+    this.settings.lastDreamPass = now;
+    await this.saveSettings();
+    if (plan.promote.length + plan.dedup.length + plan.stale.length === 0) return;
+    const snap = await applyPlan(this.app, plan, new Date().toISOString());
+    await this.saveDreamSnapshot(snap);
+    new Notice(
+      `Scheduled dream pass: ${plan.promote.length} promoted, ${plan.dedup.length} merged, ${plan.stale.length} stale. Undo from the command palette.`
+    );
   }
 }

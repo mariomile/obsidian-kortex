@@ -39,6 +39,10 @@ export interface MVASettings {
   // Tab bar runtime state (not user-facing settings).
   openTabIds: string[];
   activeTabId: string;
+  /** Memory dream pass automation: off | daily | weekly. */
+  dreamPassSchedule: "off" | "daily" | "weekly";
+  /** Timestamp of the last dream pass (scheduler bookkeeping). */
+  lastDreamPass: number;
 }
 
 export const DEFAULT_SETTINGS: MVASettings = {
@@ -69,6 +73,8 @@ export const DEFAULT_SETTINGS: MVASettings = {
   seededPrompts: false,
   openTabIds: [],
   activeTabId: "",
+  dreamPassSchedule: "off",
+  lastDreamPass: 0,
 };
 
 export class MVASettingTab extends PluginSettingTab {
@@ -337,6 +343,21 @@ export class MVASettingTab extends PluginSettingTab {
     );
     toggle("Surface related notes", "Show notes related to the active note in the empty state.", "featureSurfacing");
     toggle("Wikilink-ify replies", "Turn mentions of existing note titles in replies into clickable [[wikilinks]].", "featureWikilinkify");
+
+    new Setting(containerEl)
+      .setName("Memory dream pass")
+      .setDesc(
+        "Deterministically consolidate _system/memory: merge duplicate learnings, promote well-evidenced ones to rules, mark stale rules. Every run is snapshotted and undoable. Run manually anytime from the command palette; set a schedule to automate."
+      )
+      .addDropdown((d) =>
+        d
+          .addOptions({ off: "Off", daily: "Daily", weekly: "Weekly" })
+          .setValue(this.plugin.settings.dreamPassSchedule)
+          .onChange(async (v) => {
+            this.plugin.settings.dreamPassSchedule = v as "off" | "daily" | "weekly";
+            await this.plugin.saveSettings();
+          })
+      );
 
     this.renderMcpSection(containerEl);
   }
