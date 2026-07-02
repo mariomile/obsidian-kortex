@@ -354,7 +354,19 @@ class ClaudeSession implements AgentSession {
     try {
       const u = await this.q.getContextUsage?.();
       if (u && typeof u.totalTokens === "number" && typeof u.maxTokens === "number" && u.maxTokens > 0) {
-        return { used: u.totalTokens, total: u.maxTokens };
+        const result: ContextUsage = { used: u.totalTokens, total: u.maxTokens };
+        // Session cost is an experimental SDK control request — best-effort only.
+        // Any failure (older CLI, API-key session without cost data, shape
+        // change) must never block or break the context bar; just omit cost.
+        try {
+          const usage = await this.q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?.();
+          if (typeof usage?.session?.total_cost_usd === "number") {
+            result.costUsd = usage.session.total_cost_usd;
+          }
+        } catch {
+          /* cost unavailable — omit silently */
+        }
+        return result;
       }
     } catch {
       /* not available */

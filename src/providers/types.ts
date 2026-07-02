@@ -39,6 +39,10 @@ export type AgentEvent =
 export interface ContextUsage {
   used: number;
   total: number;
+  /** Estimated session cost in USD, when the provider/SDK exposes it. Claude
+   *  only, via an experimental SDK control request; omitted (not zero) when
+   *  unavailable — the UI must degrade gracefully, never show a fake $0.00. */
+  costUsd?: number;
 }
 
 /** An image attached to a user turn (base64), for multimodal input. */

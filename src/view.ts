@@ -242,6 +242,13 @@ export class ChatView extends ItemView {
   private provider: ProviderId;
   private model: string;
   private usageEl: HTMLElement | null = null;
+  private usageModelEl: HTMLElement | null = null;
+  private usageFillEl: HTMLElement | null = null;
+  private usagePctEl: HTMLElement | null = null;
+  private usageCostEl: HTMLElement | null = null;
+  /** Last usage payload received (or null) — cached so a model/provider change
+   *  alone (no new 'usage' event) can still re-render the statusline label. */
+  private lastUsage: ContextUsage | null = null;
 
   /** Active conversation is streaming (drives the send/stop button). */
   private get streaming(): boolean {
@@ -1460,6 +1467,9 @@ export class ChatView extends ItemView {
         }
         this.model = v;
         this.persistModel();
+        // Re-render the statusline's model label immediately — no new usage
+        // event fires just from a model switch, so refresh with cached data.
+        this.updateUsage(this.lastUsage);
       },
     });
 
@@ -1510,6 +1520,12 @@ export class ChatView extends ItemView {
       attr: { "aria-label": "Context used — click to compact" },
     });
     this.usageEl.onclick = () => this.compactActive();
+    this.usageModelEl = this.usageEl.createSpan({ cls: "mva-usage-model" });
+    const usageBar = this.usageEl.createDiv({ cls: "mva-usage-bar" });
+    this.usageFillEl = usageBar.createDiv({ cls: "mva-usage-fill" });
+    this.usagePctEl = this.usageEl.createSpan({ cls: "mva-usage-pct" });
+    this.usageCostEl = this.usageEl.createSpan({ cls: "mva-usage-cost" });
+    this.updateUsage(null);
 
     // Send button — lives inside the input box, right side.
     this.sendBtn = tb.createEl("button", { cls: "mva-send", attr: { "aria-label": "Send" } });
@@ -1586,16 +1602,45 @@ export class ChatView extends ItemView {
     return refresh;
   }
 
+  /**
+   * Single entry point for the composer footer's context-usage statusline
+   * (fill bar + % + model label + session cost). Called after every 'usage'
+   * event and whenever model/provider changes so the label stays in sync even
+   * without a fresh event. NOTE for M3 (guided compaction): the >=75% trigger
+   * should hook in here — this stays the one place usage state is rendered.
+   */
   private updateUsage(u: ContextUsage | null): void {
     if (!this.usageEl) return;
+    this.lastUsage = u;
+    this.usageModelEl?.setText(this.modelLabel());
+
+    this.usageEl.removeClass("is-caution");
+    this.usageEl.removeClass("is-danger");
+
     if (!u || !u.total) {
-      this.usageEl.setText("");
-      this.usageEl.removeClass("is-warn");
+      this.usageEl.addClass("is-empty");
+      if (this.usageFillEl) this.usageFillEl.style.transform = "scaleX(0)";
+      this.usagePctEl?.setText("");
+      this.usageCostEl?.setText("");
       return;
     }
+
+    this.usageEl.removeClass("is-empty");
     const pct = Math.min(100, Math.round((u.used / u.total) * 100));
-    this.usageEl.setText(`${pct}% ctx`);
-    this.usageEl.toggleClass("is-warn", pct >= 80);
+    if (this.usageFillEl) this.usageFillEl.style.transform = `scaleX(${pct / 100})`;
+    this.usagePctEl?.setText(`${pct}%`);
+
+    const risk: RiskLevel = pct >= 90 ? "is-danger" : pct >= 75 ? "is-caution" : "";
+    if (risk) this.usageEl.addClass(risk);
+
+    // Codex never emits usage events (no cost field either) — Claude sessions
+    // omit costUsd when the experimental SDK cost API is unavailable. Either
+    // way: no cost data means no cost text, never a broken/placeholder UI.
+    if (typeof u.costUsd === "number") {
+      this.usageCostEl?.setText(`$${u.costUsd.toFixed(2)}`);
+    } else {
+      this.usageCostEl?.setText("");
+    }
   }
 
 

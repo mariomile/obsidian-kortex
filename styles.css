@@ -1694,10 +1694,17 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 
 /* ------------------------------- usage -------------------------------- */
+/* Quiet Cline-style statusline: model label · fill bar · % · session cost.
+   Neutral by default; tints amber/red at the same thresholds as the risk
+   chips elsewhere in the toolbar (is-caution / is-danger). */
 .mva-usage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
   font-size: 11px;
   color: var(--text-faint);
-  padding: 2px 4px;
+  padding: 2px 6px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   border-radius: var(--mva-r1);
@@ -1706,9 +1713,51 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   color: var(--text-muted);
   background: var(--background-modifier-hover);
 }
-.mva-usage.is-warn {
-  color: var(--color-orange, #e0a341);
+.mva-usage-model {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 96px;
 }
+.mva-usage-bar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+.mva-usage-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--text-faint);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms ease;
+}
+.mva-usage-pct {
+  flex-shrink: 0;
+}
+.mva-usage-cost {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.mva-usage-cost:not(:empty)::before {
+  content: "·";
+  margin-right: 6px;
+}
+/* No usage data yet (fresh session) or provider doesn't report it (Codex) —
+   show only the model label, never a meaningless empty bar. */
+.mva-usage.is-empty .mva-usage-bar,
+.mva-usage.is-empty .mva-usage-pct {
+  display: none;
+}
+.mva-usage.is-caution .mva-usage-fill { background: var(--color-orange, #e0a341); }
+.mva-usage.is-caution .mva-usage-pct  { color: var(--color-orange, #e0a341); }
+.mva-usage.is-danger .mva-usage-fill { background: var(--color-red, #e05b5b); }
+.mva-usage.is-danger .mva-usage-pct  { color: var(--color-red, #e05b5b); }
 
 /* --------------------------- compact divider -------------------------- */
 .mva-compact-divider {
