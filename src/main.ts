@@ -1,4 +1,4 @@
-import { Editor, FileSystemAdapter, MarkdownView, Notice, Plugin, WorkspaceLeaf, addIcon } from "obsidian";
+import { Editor, FileSystemAdapter, FuzzySuggestModal, MarkdownView, Notice, Plugin, WorkspaceLeaf, addIcon } from "obsidian";
 import { ChatView, VIEW_TYPE, EXO_ICON } from "./view";
 import { DEFAULT_SETTINGS, MVASettingTab, type MVASettings } from "./settings";
 import { ADAPTERS } from "./providers/registry";
@@ -7,6 +7,7 @@ import { InlineEditModal } from "./ui/inline-edit";
 import type { AgentEvent } from "./providers/types";
 import { computePlan, applyPlan, undoPlan, type DreamSnapshot } from "./obsidian/dream";
 import { DreamModal } from "./ui/dream-modal";
+import { runHeadlessPlaybook, writeReport } from "./headless";
 
 export default class ExoPlugin extends Plugin {
   settings!: MVASettings;
@@ -98,6 +99,20 @@ export default class ExoPlugin extends Plugin {
     });
     // Hourly check; runs a scheduled pass only when due per settings.
     this.registerInterval(window.setInterval(() => void this.maybeScheduledDreamPass(), 60 * 60 * 1000));
+
+    this.addCommand({
+      id: "run-playbook",
+      name: "Run playbook now (headless, read-only)",
+      callback: () => {
+        const prompts = this.settings.customPrompts;
+        if (!prompts.length) {
+          new Notice("No custom prompts yet — add some in Exo settings.");
+          return;
+        }
+        new PlaybookPicker(this.app, prompts, (p) => void this.runPlaybook(p.name, p.prompt)).open();
+      },
+    });
+    this.registerInterval(window.setInterval(() => void this.checkScheduledRuns(), 30 * 60 * 1000));
 
     this.addSettingTab(new MVASettingTab(this.app, this));
   }
@@ -266,5 +281,62 @@ export default class ExoPlugin extends Plugin {
     new Notice(
       `Scheduled dream pass: ${plan.promote.length} promoted, ${plan.dedup.length} merged, ${plan.stale.length} stale. Undo from the command palette.`
     );
+  }
+
+  /** Run one playbook headlessly and write its report. */
+  private async runPlaybook(name: string, prompt: string): Promise<void> {
+    if (/\{\{\s*[\w-]+\s*\}\}/.test(prompt)) {
+      new Notice(`"${name}" has {{variables}} — run it from the composer instead.`);
+      return;
+    }
+    new Notice(`Running playbook "${name}"…`);
+    const result = await runHeadlessPlaybook(this.app, this.settings, prompt);
+    const path = await writeReport(this.app, name, result);
+    new Notice(
+      result.ok ? `Playbook "${name}" done → ${path}` : `Playbook "${name}" failed (report: ${path})`
+    );
+  }
+
+  /** Run any scheduled playbooks that are due (off by default — empty list). */
+  private async checkScheduledRuns(): Promise<void> {
+    const lines = this.settings.scheduledRuns.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    const now = Date.now();
+    for (const line of lines) {
+      const i = line.lastIndexOf("|");
+      if (i < 0) continue;
+      const name = line.slice(0, i).trim();
+      const cadence = line.slice(i + 1).trim().toLowerCase();
+      const period = cadence === "daily" ? 20 * 60 * 60 * 1000 : cadence === "weekly" ? 6.5 * 24 * 60 * 60 * 1000 : 0;
+      if (!period || !name) continue;
+      const p = this.settings.customPrompts.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!p) continue;
+      const last = this.settings.scheduledLastRun[p.name] ?? 0;
+      if (now - last < period) continue;
+      this.settings.scheduledLastRun[p.name] = now;
+      await this.saveSettings();
+      await this.runPlaybook(p.name, p.prompt); // sequential — one at a time
+    }
+  }
+}
+
+/* --------------------------- playbook picker --------------------------- */
+class PlaybookPicker extends FuzzySuggestModal<{ name: string; prompt: string }> {
+  constructor(
+    app: import("obsidian").App,
+    private prompts: { name: string; prompt: string }[],
+    private onPick: (p: { name: string; prompt: string }) => void
+  ) {
+    super(app);
+    this.setPlaceholder("Run a playbook (read-only, report to _system/reports/)…");
+  }
+  getItems(): { name: string; prompt: string }[] {
+    return this.prompts;
+  }
+  getItemText(p: { name: string; prompt: string }): string {
+    return p.name;
+  }
+  onChooseItem(p: { name: string; prompt: string }): void {
+    this.onPick(p);
   }
 }

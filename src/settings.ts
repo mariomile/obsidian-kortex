@@ -43,6 +43,10 @@ export interface MVASettings {
   dreamPassSchedule: "off" | "daily" | "weekly";
   /** Timestamp of the last dream pass (scheduler bookkeeping). */
   lastDreamPass: number;
+  /** Scheduled playbook runs — one per line: "<Prompt name> | daily" or "<Prompt name> | weekly". */
+  scheduledRuns: string;
+  /** Per-playbook last-run timestamps (scheduler bookkeeping). */
+  scheduledLastRun: Record<string, number>;
 }
 
 export const DEFAULT_SETTINGS: MVASettings = {
@@ -75,6 +79,8 @@ export const DEFAULT_SETTINGS: MVASettings = {
   activeTabId: "",
   dreamPassSchedule: "off",
   lastDreamPass: 0,
+  scheduledRuns: "",
+  scheduledLastRun: {},
 };
 
 export class MVASettingTab extends PluginSettingTab {
@@ -358,6 +364,21 @@ export class MVASettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("Scheduled playbook runs")
+      .setDesc(
+        'Run a custom prompt unattended on a schedule — read-only: the agent can read the vault but every write is denied; the only output is a report note in _system/reports/. One per line: "Prompt name | daily" or "Prompt name | weekly". Prompts with {{variables}} can\'t be scheduled.'
+      )
+      .addTextArea((t) => {
+        t.setPlaceholder("Morning brief | daily")
+          .setValue(this.plugin.settings.scheduledRuns)
+          .onChange(async (v) => {
+            this.plugin.settings.scheduledRuns = v;
+            await this.plugin.saveSettings();
+          });
+        t.inputEl.rows = 3;
+      });
 
     this.renderMcpSection(containerEl);
   }
