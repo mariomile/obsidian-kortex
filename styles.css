@@ -1045,6 +1045,60 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-tool.is-collapsed .mva-tool-body {
   display: none;
 }
+/* Collapsed (default) tool call: a single thin muted row — the tool a reply used
+   is secondary; the content is the protagonist. Expanding restores the card look
+   with the full detail view (diff, output). */
+.mva-tool.is-collapsed {
+  border: none;
+  background: transparent;
+  border-radius: var(--mva-r1);
+}
+.mva-tool.is-collapsed .mva-tool-head {
+  min-height: 24px;
+  padding: 3px 6px;
+  gap: 6px;
+}
+.mva-tool.is-collapsed .mva-tool-head:hover {
+  background: color-mix(in srgb, var(--background-modifier-hover) 60%, transparent);
+}
+/* Status icon → 7px dot; tool-type icon hidden in the row. */
+.mva-tool.is-collapsed .mva-tool-icon {
+  display: none;
+}
+.mva-tool.is-collapsed .mva-tool-status .svg-icon {
+  display: none;
+}
+.mva-tool.is-collapsed .mva-tool-status::before {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.mva-tool.is-running.is-collapsed .mva-tool-status {
+  animation: none; /* the icon spin is meaningless on a dot */
+}
+.mva-tool.is-running.is-collapsed .mva-tool-status::before {
+  background: var(--mva-brand, var(--interactive-accent));
+  animation: mva-pulse 1.2s ease-in-out infinite;
+}
+.mva-tool.is-ok.is-collapsed .mva-tool-status::before {
+  background: var(--color-green, #19c37d);
+}
+.mva-tool.is-error.is-collapsed .mva-tool-status::before {
+  background: var(--text-error);
+}
+.mva-tool.is-collapsed .mva-tool-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.mva-tool.is-collapsed .mva-tool-target {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
 /* Background Bash tasks (F3): accent border-tint + badge chip. */
 .mva-tool-bg {
   border-color: color-mix(in srgb, var(--mva-brand, var(--interactive-accent)) 45%, var(--background-modifier-border));
