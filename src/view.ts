@@ -978,7 +978,9 @@ export class ChatView extends ItemView {
       return;
     }
 
-    const search = wrap.createEl("input", {
+    const searchWrap = wrap.createDiv({ cls: "mva-gallery-search-wrap" });
+    setIcon(searchWrap.createSpan({ cls: "mva-gallery-search-ico" }), "search");
+    const search = searchWrap.createEl("input", {
       cls: "mva-gallery-search",
       attr: { type: "text", placeholder: "Search conversations…" },
     });

@@ -1490,19 +1490,45 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
   font-weight: 650;
   color: var(--text-normal);
 }
+/* Contained search input, inset to match the grid's own card margins. */
+.mva-gallery-search-wrap {
+  position: relative;
+  margin: 0 14px 14px;
+}
+.mva-gallery-search-ico {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.mva-gallery-search-ico .svg-icon {
+  width: 14px;
+  height: 14px;
+}
 .mva-gallery-search {
+  display: block;
   width: 100%;
-  margin: 0 0 12px;
-  padding: 8px 12px;
+  height: 34px;
+  margin: 0;
+  padding: 0 12px 0 30px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   background: var(--background-primary);
   color: var(--text-normal);
   font-size: var(--font-ui-small);
+  box-sizing: border-box;
+  transition: border-color var(--mva-t), box-shadow var(--mva-t);
+}
+.mva-gallery-search::placeholder {
+  color: var(--text-faint);
 }
 .mva-gallery-search:focus {
   outline: none;
   border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
 }
 .mva-gallery {
   flex: 1;
