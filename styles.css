@@ -2319,8 +2319,10 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 }
 
 /* ---------------------- turn duration (F2) ---------------------------- */
-.mva-turn-duration {
+/* Always visible — completion feedback lives outside the hover-gated actions bar. */
+.mva-turn-meta {
   font-size: 11px;
   color: var(--text-faint);
-  margin-left: auto;
+  text-align: right;
+  padding: 2px 0;
 }

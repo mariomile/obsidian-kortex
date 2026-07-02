@@ -3442,10 +3442,13 @@ export class ChatView extends ItemView {
       if (ctx.fullText.trim()) {
         this.attachActions(ctx.el, ctx.fullText, text, c);
         // Turn duration (Feature 2): live-only, only when it's worth showing.
+        // Always visible (completion feedback, CC's "Crunched for 2m 49s") — a
+        // sibling AFTER the hover-gated actions bar, never inside it.
         const elapsed = Date.now() - turnStart;
         if (elapsed > 5000) {
-          const bar = ctx.el.querySelector(".mva-actions") as HTMLElement | null;
-          bar?.createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
+          ctx.el
+            .createDiv({ cls: "mva-turn-meta" })
+            .createSpan({ cls: "mva-turn-duration", text: `✻ ${this.fmtDuration(elapsed)}` });
         }
       }
       // Turn finished normally (Feature 3): notify if it ran long and the window
