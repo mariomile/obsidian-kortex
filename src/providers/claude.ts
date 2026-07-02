@@ -37,6 +37,9 @@ class ClaudeSession implements AgentSession {
   /** Force-deny callback for an in-flight permission request, so interrupt/dispose
    *  unblock the SDK (otherwise parked waiting for canUseTool to resolve → turn hangs). */
   private denyPending: (() => void) | null = null;
+  /** Per-turn tail of CLI stderr lines, surfaced when a turn ends in an error whose
+   *  `result` is empty (e.g. error_during_execution). Cleared at the start of send(). */
+  private stderrTail: string[] = [];
 
   constructor(opts: SessionOpts) {
     this.sessionId = opts.resumeSessionId;
@@ -84,6 +87,16 @@ class ClaudeSession implements AgentSession {
         ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
         pathToClaudeCodeExecutable: opts.cli.bin,
         includePartialMessages: true,
+        // Keep a short tail of CLI stderr so an opaque execution error (empty
+        // `result`) can still surface actionable detail. Bounded ring buffer.
+        stderr: (data: string) => {
+          for (const line of data.split("\n")) {
+            const t = line.trim();
+            if (!t) continue;
+            this.stderrTail.push(t.length > 400 ? t.slice(0, 400) + "…" : t);
+            if (this.stderrTail.length > 12) this.stderrTail.shift();
+          }
+        },
         // In-process Obsidian tools (if enabled). strictMcpConfig keeps only
         // this server (no external MCP) for a fast, predictable cold start.
         ...(opts.obsidianServer
@@ -209,7 +222,11 @@ class ClaudeSession implements AgentSession {
       }
     } else if (msg.type === "result") {
       if (msg.subtype && msg.subtype !== "success") {
-        emit({ kind: "error", message: msg.result || `Claude ended: ${msg.subtype}` });
+        let message = msg.result || `Claude ended: ${msg.subtype}`;
+        if (this.stderrTail.length) {
+          message += "\n\nCLI stderr (tail):\n" + this.stderrTail.slice(-6).join("\n");
+        }
+        emit({ kind: "error", message });
       }
       emit({ kind: "turn-end", sessionId: this.sessionId });
       this.settleTurn();
@@ -239,6 +256,7 @@ class ClaudeSession implements AgentSession {
     // Guard against overlapping turns: a second send() while one is in flight would
     // orphan the first promise (its resolve/reject would be overwritten).
     if (this.resolveTurn) return Promise.reject(new Error("A turn is already in flight."));
+    this.stderrTail = []; // per-turn tail — drop any lines from a prior turn
     this.onEvent = onEvent;
     const content: UserContent =
       images && images.length
