@@ -6,19 +6,6 @@
 
 An agentic AI assistant in your Obsidian sidebar, powered by the **Claude CLI** or the **Codex CLI**. Your vault is the agent's working directory. Custom-rendered, theme-aware chat UI — no terminal.
 
-![Exo — empty state](assets/exo-hero.png)
-
-<table>
-  <tr>
-    <td width="50%"><img src="assets/exo-convo.png" alt="Exo — a vault-aware turn: native search, graph neighborhood, and the touched-notes footer" /></td>
-    <td width="50%"><img src="assets/exo-caps.png" alt="Exo — Capabilities panel: live view of tools, MCP servers, sub-agents, skills and commands" /></td>
-  </tr>
-  <tr>
-    <td><em>A vault-aware turn — native search + graph neighborhood, with the grouped footer of notes the turn read and edited.</em></td>
-    <td><em>The Capabilities panel — a live view of active tools, MCP servers, sub-agents, skills and commands.</em></td>
-  </tr>
-</table>
-
 ## Features
 
 - **Custom chat UI** — streaming markdown, message bubbles, theme-agnostic (built on Obsidian's native CSS variables; transparent panel that adapts to any theme).

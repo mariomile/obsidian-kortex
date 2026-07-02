@@ -136,7 +136,7 @@ export function isAbort(e: unknown): boolean {
 /** Map a spawn/CLI error to a short, user-facing message. */
 export function describeError(e: unknown, cliName = "CLI"): string {
   if (e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "ENOENT") {
-    return `${cliName} not found. Run \`which ${cliName.toLowerCase()}\` in a terminal and paste the path in Marioverse Agent settings.`;
+    return `${cliName} not found. Run \`which ${cliName.toLowerCase()}\` in a terminal and paste the path in Exo settings.`;
   }
   if (e instanceof Error) {
     const msg = e.message || "";

@@ -7,8 +7,7 @@ import { join } from "path";
 const prod = process.argv[2] === "production";
 
 // Live-deploy target: a `.obsidian-plugin-dir` file (gitignored) containing the
-// absolute path to `.obsidian/plugins/marioverse-agent`. Mirrors the convention
-// used in obsidian-selection-toolbar.
+// absolute path to `.obsidian/plugins/exo`.
 const deployDir = existsSync(".obsidian-plugin-dir")
   ? readFileSync(".obsidian-plugin-dir", "utf8").trim()
   : process.env.OBSIDIAN_PLUGIN_DIR || null;
