@@ -145,6 +145,8 @@ interface AssistantCtx {
   renderTimer: number | null;
   /** Live TodoWrite panel for this turn (re-rendered on each update). */
   todosEl: HTMLElement | null;
+  /** Background Bash tasks this turn: tool-call id → card + badge + parsed shell id. */
+  bgTasks: Map<string, { cardEl: HTMLElement; badgeEl: HTMLElement; shellId?: string }>;
 }
 
 /** Abort a turn if no event arrives for this long (avoids infinite loading). */
@@ -1720,6 +1722,7 @@ export class ChatView extends ItemView {
       convo: c,
       renderTimer: null,
       todosEl: null,
+      bgTasks: new Map(),
     };
     this.askTargetCtx = ctx;
     this.scrollConvo(c);
@@ -2200,6 +2203,55 @@ export class ChatView extends ItemView {
     this.scrollConvo(ctx.convo);
   }
 
+  /* ---------------------- background tasks (F3) --------------------- */
+
+  /** Append a small badge chip to a tool card's head. */
+  private addToolBadge(card: HTMLElement, text: string): HTMLElement {
+    const head = (card.querySelector(".mva-tool-head") as HTMLElement | null) ?? card;
+    return head.createSpan({ cls: "mva-badge-bg", text });
+  }
+
+  /** On tool-call-start: badge a background Bash card and link BashOutput/KillShell
+   *  cards to their originating background task (presentational only — no polling). */
+  private trackBackgroundTask(ctx: AssistantCtx, id: string, name: string, input: unknown): void {
+    const i = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    const card = ctx.cards.get(id)?.card;
+    if (!card) return;
+    if (name === "Bash" && i.run_in_background === true) {
+      card.addClass("mva-tool-bg");
+      const badge = this.addToolBadge(card, "background");
+      ctx.bgTasks.set(id, { cardEl: card, badgeEl: badge });
+      return;
+    }
+    if (name === "BashOutput" || name === "KillShell") {
+      const sid =
+        (typeof i.bash_id === "string" && i.bash_id) ||
+        (typeof i.shell_id === "string" && i.shell_id) ||
+        "";
+      if (!sid) return;
+      for (const task of ctx.bgTasks.values()) {
+        if (task.shellId && task.shellId === sid) {
+          card.addClass("mva-tool-bg");
+          this.addToolBadge(card, "↳ background task");
+          task.badgeEl.setText(name === "KillShell" ? "stopped" : "running");
+          break;
+        }
+      }
+    }
+  }
+
+  /** On tool-call-result of a background Bash: parse the shell id from the CLI
+   *  output so later BashOutput/KillShell calls can link back to this task. */
+  private linkBackgroundResult(ctx: AssistantCtx, id: string, output: string): void {
+    const task = ctx.bgTasks.get(id);
+    if (!task) return;
+    const sid =
+      output.match(/\b(bash_[\w-]+)\b/)?.[1] ||
+      output.match(/shell(?:Id)?[:\s]+([\w-]+)/i)?.[1] ||
+      output.match(/\bID[:\s]+([\w-]+)/i)?.[1];
+    if (sid) task.shellId = sid;
+  }
+
   /* -------------------------- permissions --------------------------- */
 
   /** Signature for the "Always allow" list — argument-aware so allowing one
@@ -2590,6 +2642,7 @@ export class ChatView extends ItemView {
             break;
           }
           this.addToolCard(ctx, e.id, e.name, e.input);
+          this.trackBackgroundTask(ctx, e.id, e.name, e.input);
           const fp = toolFilePath(e.name, e.input);
           if (fp) {
             const kind = ChatView.WRITE_TOOLS.test(e.name) ? "write" : "read";
@@ -2612,6 +2665,7 @@ export class ChatView extends ItemView {
             break;
           }
           this.resolveToolCard(ctx, e.id, e.ok, e.output);
+          this.linkBackgroundResult(ctx, e.id, e.output);
           const wp = ctx.writeById.get(e.id);
           if (e.ok && wp && this.plugin.settings.revealEditedNotes && !ctx.revealed.has(wp)) {
             ctx.revealed.add(wp);
@@ -2746,6 +2800,15 @@ export class ChatView extends ItemView {
           role: "assistant",
           segments: ctx.segments,
           ...(checkpoint.size ? { checkpoint } : {}),
+        });
+      }
+      // Background shells can outlive the turn (Exo can't poll them) — note them
+      // honestly as "started this turn" rather than claiming a live running count.
+      if (ctx.bgTasks.size) {
+        const n = ctx.bgTasks.size;
+        ctx.el.createDiv({
+          cls: "mva-faint mva-bg-foot",
+          text: `${n} background task${n > 1 ? "s" : ""} started this turn`,
         });
       }
       c.updatedAt = Date.now();

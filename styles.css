@@ -998,6 +998,26 @@ body:not(.is-mobile) .mod-sidedock .workspace-leaf-content > .view-content.mva-r
 .mva-tool.is-collapsed .mva-tool-body {
   display: none;
 }
+/* Background Bash tasks (F3): accent border-tint + badge chip. */
+.mva-tool-bg {
+  border-color: color-mix(in srgb, var(--mva-brand, var(--interactive-accent)) 45%, var(--background-modifier-border));
+}
+.mva-badge-bg {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mva-brand, var(--interactive-accent));
+  background: color-mix(in srgb, var(--mva-brand, var(--interactive-accent)) 14%, transparent);
+  border-radius: var(--mva-r1);
+  white-space: nowrap;
+}
+.mva-bg-foot {
+  margin-top: 6px;
+}
 .mva-tool-output {
   margin: 8px 0 0;
   max-height: 220px;
